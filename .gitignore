@@ -1,0 +1,10 @@
+# APIキーなどの秘密情報
+.env
+.env.*
+!.env.example
+
+node_modules/
+.vercel/
+_backup_*/
+.claude/
+dist/

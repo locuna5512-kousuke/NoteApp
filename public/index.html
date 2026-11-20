@@ -1,0 +1,323 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ノート | 学習伴走ノート</title>
+  <!-- 文字の書体 (Google Fonts) と、共通のスタイル -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="page-note" data-view="note">
+
+  <!-- 線のアイコン (ここで1回だけ定義し、各所で <use href="#i-…"> として使い回す) -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-home" viewBox="0 0 16 16"><path d="M2 7.5 8 2.5l6 5V14H10v-4H6v4H2z"/></symbol>
+    <symbol id="i-note" viewBox="0 0 16 16"><path d="M3.5 1.5h6l3 3v10h-9z M9.5 1.5v3h3 M5.5 8h5 M5.5 11h3.5"/></symbol>
+    <symbol id="i-test" viewBox="0 0 16 16"><path d="M3 2.5h10v11H3z M5.5 6l1.2 1.2L9 5 M5.5 10.5h5"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 16 16"><path d="M2.5 3.5h11v10h-11z M2.5 6.5h11 M5.5 2v3 M10.5 2v3"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 16 16"><path d="M2 14h12 M4 11V8 M8 11V4 M12 11V6.5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.5 4v8.5h13V5.5h-6.5L6.5 4z"/></symbol>
+    <symbol id="i-unit" viewBox="0 0 16 16"><path d="M8 1.8 14 5 8 8.2 2 5z M2 8l6 3.2L14 8 M2 11l6 3.2 6-3.2"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 16 16"><path d="M6 3l5 5-5 5"/></symbol>
+    <symbol id="i-down" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+    <symbol id="i-more" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="12.5" cy="8" r=".6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></symbol>
+    <symbol id="i-explain" viewBox="0 0 16 16"><path d="M2 3h12v8H7l-3 2.5V11H2z M5 6h6 M5 8.2h4"/></symbol>
+    <symbol id="i-summary" viewBox="0 0 16 16"><path d="M3 3.5h10 M3 6.5h10 M3 9.5h6 M3 12.5h4"/></symbol>
+    <symbol id="i-photo" viewBox="0 0 16 16"><path d="M1.5 4.5h3l1.2-2h4.6l1.2 2h3v9h-13z"/><circle cx="8" cy="9" r="2.6"/></symbol>
+    <symbol id="i-min" viewBox="0 0 16 16"><path d="M3 8h10"/></symbol>
+    <symbol id="i-close" viewBox="0 0 16 16"><path d="M3.5 3.5l9 9 M12.5 3.5l-9 9"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10 M3 8h10"/></symbol>
+    <symbol id="i-back" viewBox="0 0 16 16"><path d="M13 8H3 M7 4 3 8l4 4"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 16 16"><path d="M4 11V7a4 4 0 0 1 8 0v4l1.2 1.5H2.8z M6.5 14h3"/></symbol>
+    <!-- ツールボックス -->
+    <symbol id="t-undo" viewBox="0 0 16 16"><path d="M5.5 3 2.5 6l3 3 M2.5 6h7a4 4 0 0 1 0 8H7"/></symbol>
+    <symbol id="t-redo" viewBox="0 0 16 16"><path d="M10.5 3l3 3-3 3 M13.5 6h-7a4 4 0 0 0 0 8H9"/></symbol>
+    <symbol id="t-brush" viewBox="0 0 16 16"><path d="M9.5 2.5l4 4-5 5-4-4z M4.5 7.5 2 10c-1 1 .5 3.5 2 3.5s2-1 3-2.5"/></symbol>
+    <symbol id="t-eraser" viewBox="0 0 16 16"><path d="M6 13.5 2.5 10a1.4 1.4 0 0 1 0-2l5.5-5.5a1.4 1.4 0 0 1 2 0l3.5 3.5a1.4 1.4 0 0 1 0 2L8 13.5z M5 6l5 5 M6 13.5h8"/></symbol>
+    <symbol id="t-marker" viewBox="0 0 16 16"><path d="M10 2.5l3.5 3.5-6 6H4v-3.5z M3 14.5h10"/></symbol>
+    <symbol id="t-table" viewBox="0 0 16 16"><path d="M2 2.5h12v11H2z M2 6.5h12 M2 10h12 M6.5 2.5v11 M10 2.5v11"/></symbol>
+    <symbol id="t-check" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2 7.2 10 10.8 6"/></symbol>
+    <symbol id="t-size" viewBox="0 0 16 16"><path d="M1.5 4.5V3h7v1.5 M5 3v10 M3.5 13h3 M9 8V7h5.5v1 M11.75 7v6 M10.75 13h2"/></symbol>
+    <symbol id="t-list" viewBox="0 0 16 16"><path d="M6 4h8 M6 8h8 M6 12h8"/><circle cx="2.7" cy="4" r=".7"/><circle cx="2.7" cy="8" r=".7"/><circle cx="2.7" cy="12" r=".7"/></symbol>
+    <symbol id="t-align" viewBox="0 0 16 16"><path d="M2 3.5h12 M4 6.5h8 M2 9.5h12 M4 12.5h8"/></symbol>
+    <symbol id="t-color" viewBox="0 0 16 16"><path d="M4 12 8 2.5 12 12 M5.4 8.8h5.2"/></symbol>
+    <symbol id="t-hilite" viewBox="0 0 16 16"><path d="M9.5 2l3.5 3.5-5.5 5.5H4V7.5z M4 11l-1.5 1.5"/></symbol>
+    <symbol id="t-full" viewBox="0 0 16 16"><path d="M2.5 6V2.5H6 M10 2.5h3.5V6 M13.5 10v3.5H10 M6 13.5H2.5V10"/></symbol>
+    <symbol id="t-exit" viewBox="0 0 16 16"><path d="M6 2.5V6H2.5 M13.5 6H10V2.5 M10 13.5V10h3.5 M2.5 10H6v3.5"/></symbol>
+  </svg>
+
+  <div class="app">
+
+    <!-- 左: メニュー -->
+    <aside class="sidebar">
+      <a class="brand" href="dashboard.html"><span class="brand-mark" aria-hidden="true"></span>学習伴走ノート</a>
+      <nav class="nav" aria-label="画面の切り替え">
+        <a href="dashboard.html" title="ホーム"><span class="ico"><svg class="i"><use href="#i-home"/></svg></span>ホーム</a>
+        <a href="index.html" aria-current="page" title="ノート"><span class="ico"><svg class="i"><use href="#i-note"/></svg></span>ノート</a>
+        <a href="dashboard.html#test" title="テスト"><span class="ico"><svg class="i"><use href="#i-test"/></svg></span>テスト</a>
+        <a href="dashboard.html#schedule" title="予定"><span class="ico"><svg class="i"><use href="#i-cal"/></svg></span>予定</a>
+        <a href="dashboard.html#record" title="学習の記録"><span class="ico"><svg class="i"><use href="#i-chart"/></svg></span>学習の記録</a>
+      </nav>
+      <!-- 左下のヒント: 用語の書き方 -->
+      <div class="help-card">
+        <h3>用語は <b>太字</b> で</h3>
+        <p><code>用語: 説明</code> の行で用語を太字にすると、テストと説明チェックに使われます</p>
+      </div>
+    </aside>
+
+    <!-- 中央パネル: 科目 › 単元 › ノート -->
+    <section class="panel" aria-label="科目とノート">
+      <div class="panel-head">
+        <div>
+          <h1>ノート</h1>
+          <p class="date" id="todayText"></p>
+        </div>
+        <button class="plus-btn" id="newNoteBtn" type="button" aria-label="新しいノート" title="新しいノート"><svg class="i"><use href="#i-plus"/></svg></button>
+      </div>
+      <!-- すべてのノートを検索 -->
+      <label class="search">
+        <svg class="i"><use href="#i-search"/></svg>
+        <input id="searchInput" type="search" placeholder="すべてのノートを検索" aria-label="すべてのノートを検索">
+        <span class="search-count" id="searchCount"></span>
+      </label>
+      <!-- 科目 › 単元 › ノート のツリー (中身は app.js で作る) -->
+      <nav class="side-tree" aria-label="科目とノート">
+        <p class="label">科目<span class="space"></span>
+          <button class="icon-btn" id="addSubjectBtn" type="button" aria-label="科目を追加" title="科目を追加"><svg class="i"><use href="#i-plus"/></svg></button>
+        </p>
+        <ul class="tree-root" id="tree" role="tree" aria-label="科目 › 単元 › ノート"></ul>
+      </nav>
+    </section>
+
+    <!-- 右: ノート -->
+    <div class="main">
+      <!-- 上の帯: 戻る・予定・アカウント -->
+      <div class="topbar">
+        <a class="round-btn" href="dashboard.html" aria-label="ホームへ戻る" title="ホームへ"><svg class="i"><use href="#i-back"/></svg></a>
+        <a class="round-btn bell" id="bell" href="dashboard.html#schedule" aria-label="予定" title="予定"><svg class="i"><use href="#i-bell"/></svg></a>
+        <div class="user">
+          <div class="who">
+            <span class="account-name" id="accountName" hidden></span>
+            <span class="role" id="accountRole">学生</span>
+          </div>
+          <button class="btn" id="registerBtn" type="button" hidden>アカウント登録</button>
+          <div class="avatar" id="avatar" aria-hidden="true"></div>
+        </div>
+      </div>
+
+      <main class="editor">
+        <!-- ツールボックス: ボタン1つで見出し・文字の大きさ・色などを指定する (タイトルの上に置く) -->
+        <div class="rte-toolbar" id="toolbar" role="toolbar" aria-label="書式">
+          <button class="tb review" type="button" data-pop="review" aria-haspopup="menu" title="復習"><svg class="i"><use href="#i-test"/></svg>復習<svg class="i caret"><use href="#i-down"/></svg></button>
+          <span class="tb-sep"></span>
+          <button class="tb" type="button" data-cmd="undo" title="元に戻す (Ctrl+Z)" aria-label="元に戻す"><svg class="i"><use href="#t-undo"/></svg></button>
+          <button class="tb" type="button" data-cmd="redo" title="やり直す (Ctrl+Y)" aria-label="やり直す"><svg class="i"><use href="#t-redo"/></svg></button>
+          <button class="tb" type="button" data-cmd="painter" title="書式のコピー: 押してから、塗りたい文字を選ぶ" aria-label="書式のコピー" aria-pressed="false"><svg class="i"><use href="#t-brush"/></svg></button>
+          <button class="tb" type="button" data-cmd="removeFormat" title="書式をクリア" aria-label="書式をクリア"><svg class="i"><use href="#t-eraser"/></svg></button>
+          <span class="tb-sep"></span>
+          <button class="tb hn" type="button" data-block="h2" title="中見出し" aria-label="中見出し">H2</button>
+          <button class="tb hn" type="button" data-block="h3" title="小見出し" aria-label="小見出し">H3</button>
+          <button class="tb hn" type="button" data-pop="heading" aria-haspopup="menu" title="見出しのレベル" aria-label="見出しのレベル">H<small>n</small><svg class="i caret"><use href="#i-down"/></svg></button>
+          <span class="tb-sep"></span>
+          <button class="tb" type="button" data-cmd="bold" title="太字 (Ctrl+B) — 用語は太字に" aria-label="太字" aria-pressed="false"><b style="font-size:15px">B</b></button>
+          <button class="tb" type="button" data-cmd="italic" title="斜体 (Ctrl+I)" aria-label="斜体" aria-pressed="false"><i style="font-size:15px;font-family:serif">I</i></button>
+          <button class="tb" type="button" data-cmd="strikeThrough" title="取り消し線" aria-label="取り消し線" aria-pressed="false"><s style="font-size:15px">S</s></button>
+          <button class="tb" type="button" data-cmd="underline" title="下線 (Ctrl+U)" aria-label="下線" aria-pressed="false"><u style="font-size:15px">U</u></button>
+          <button class="tb" type="button" data-cmd="marker" title="蛍光ペン (黄)" aria-label="蛍光ペン"><svg class="i"><use href="#t-marker"/></svg></button>
+          <span class="tb-sep"></span>
+          <button class="tb" type="button" data-cmd="table" title="表を入れる" aria-label="表を入れる"><svg class="i"><use href="#t-table"/></svg></button>
+          <button class="tb" type="button" data-cmd="checklist" title="チェックリスト" aria-label="チェックリスト"><svg class="i"><use href="#t-check"/></svg></button>
+          <button class="tb" type="button" data-pop="size" aria-haspopup="menu" title="文字の大きさ" aria-label="文字の大きさ"><svg class="i"><use href="#t-size"/></svg><svg class="i caret"><use href="#i-down"/></svg></button>
+          <button class="tb" type="button" data-pop="list" aria-haspopup="menu" title="リスト" aria-label="リスト"><svg class="i"><use href="#t-list"/></svg><svg class="i caret"><use href="#i-down"/></svg></button>
+          <button class="tb" type="button" data-pop="align" aria-haspopup="menu" title="配置" aria-label="配置"><svg class="i"><use href="#t-align"/></svg><svg class="i caret"><use href="#i-down"/></svg></button>
+          <span class="tb-split">
+            <button class="tb color-a" type="button" data-cmd="foreColor" title="文字色 (今の色で塗る)" aria-label="文字色"><svg class="i"><use href="#t-color"/></svg><i class="color-bar" id="foreBar"></i></button>
+            <button class="tb caret-btn" type="button" data-pop="fore" aria-haspopup="menu" title="文字色を選ぶ" aria-label="文字色を選ぶ"><svg class="i caret"><use href="#i-down"/></svg></button>
+          </span>
+          <span class="tb-split">
+            <button class="tb color-a" type="button" data-cmd="hiliteColor" title="背景色 (今の色で塗る)" aria-label="背景色"><svg class="i"><use href="#t-hilite"/></svg><i class="color-bar" id="hiliteBar"></i></button>
+            <button class="tb caret-btn" type="button" data-pop="hilite" aria-haspopup="menu" title="背景色を選ぶ" aria-label="背景色を選ぶ"><svg class="i caret"><use href="#i-down"/></svg></button>
+          </span>
+          <span class="tb-sep"></span>
+          <button class="tb" type="button" data-cmd="fullscreen" title="集中モード (ノートだけ表示)" aria-label="集中モード"><svg class="i"><use href="#t-full"/></svg></button>
+          <button class="tb" type="button" data-cmd="exitFullscreen" title="集中モードを終える" aria-label="集中モードを終える" disabled><svg class="i"><use href="#t-exit"/></svg></button>
+        </div>
+
+        <!-- ノートの場所。押すと別の科目・単元へ移動できる -->
+        <nav class="crumbs" id="crumbs" aria-label="ノートの場所"></nav>
+        <!-- タイトルと、更新日時などの情報 -->
+        <input class="title-input" id="titleInput" type="text" placeholder="タイトル" aria-label="ノートのタイトル">
+        <p class="meta" id="noteMeta"></p>
+
+        <div class="paper">
+          <!-- 「要点」を押したときに本文の上へ出るまとめ -->
+          <section class="summary" id="summaryBox" hidden>
+            <div class="summary-head">
+              <span>要点</span>
+              <button class="icon-btn" id="summaryClose" type="button" aria-label="要点を閉じる"><svg class="i"><use href="#i-close"/></svg></button>
+            </div>
+            <div id="summaryBody"></div>
+          </section>
+          <!-- ノート本文 (書式付きで書ける入力欄) -->
+          <div class="rte" id="editor" contenteditable="true" role="textbox" aria-multiline="true" aria-label="ノート本文" spellcheck="false"
+            data-placeholder="ノートをここにまとめる&#10;用語を太字にして「用語: 説明」と書くと、テストや説明チェックに使われます"></div>
+        </div>
+      </main>
+    </div>
+
+    <!-- 右端: 復習 -->
+    <aside class="ai">
+      <div class="ai-top">
+        <p class="label">復習</p>
+        <div class="win-btns">
+          <button class="icon-btn" id="aiMin" type="button" aria-label="パネルをたたむ" title="たたむ"><svg class="i"><use href="#i-min"/></svg></button>
+        </div>
+      </div>
+      <!-- 復習の4つのボタン -->
+      <div class="tiles">
+        <button class="tile" id="quizBtn" type="button" aria-pressed="false"><svg class="i t-ico"><use href="#i-test"/></svg>テスト<small>4択で5〜15問</small></button>
+        <button class="tile" id="explainBtn" type="button" aria-pressed="false"><svg class="i t-ico"><use href="#i-explain"/></svg>説明する<small>見ずに書く</small></button>
+        <button class="tile" id="summaryBtn" type="button" aria-pressed="false"><svg class="i t-ico"><use href="#i-summary"/></svg>要点<small>用語を5つに</small></button>
+        <button class="tile" id="photoBtn" type="button"><svg class="i t-ico"><use href="#i-photo"/></svg>写真から<small>手書きを取り込む</small></button>
+      </div>
+      <!-- テストや説明チェックの中身が表示される場所 -->
+      <div class="ai-panel" id="aiPanel" aria-live="polite"></div>
+    </aside>
+  </div>
+
+  <!-- 右下の丸いボタン: 押すと復習パネルを開く -->
+  <button class="ai-fab" id="aiOpen" type="button" aria-label="復習パネルを開く (AIに聞く)" aria-describedby="aiBubble">AI</button>
+  <!-- 「AI」ボタンの横に出る、漫画のふきだし。開いてから約10秒で消え、ボタンにマウスを乗せるとまた出る -->
+  <div class="ai-bubble" id="aiBubble" role="tooltip" hidden>
+    <b>わからないところは、ここでAIに聞こう！</b>
+    <span>テスト・説明チェック・要点まとめもできるよ</span>
+  </div>
+
+  <!-- スマホ幅だけで出る画面切り替え -->
+  <nav class="tabbar" aria-label="画面の切り替え" style="--tabs:4">
+    <a href="dashboard.html"><svg class="i"><use href="#i-home"/></svg>ホーム</a>
+    <button type="button" data-view="list"><svg class="i"><use href="#i-folder"/></svg>科目</button>
+    <button type="button" data-view="note"><svg class="i"><use href="#i-note"/></svg>ノート</button>
+    <button type="button" data-view="review"><svg class="i"><use href="#i-test"/></svg>復習</button>
+  </nav>
+
+  <!-- アカウント登録 (仮: アカウント名をこの端末に保存するだけ) -->
+  <dialog class="dialog" id="accountDialog">
+    <form method="dialog" class="dialog-inner">
+      <header class="dialog-head">
+        <h2>アカウント登録</h2>
+        <button class="icon-btn" type="button" data-close aria-label="閉じる"><svg class="i"><use href="#i-close"/></svg></button>
+      </header>
+      <label class="field"><span>アカウント名</span>
+        <input id="accountInput" type="text" maxlength="20" required autocomplete="nickname">
+      </label>
+      <footer class="dialog-foot">
+        <button class="btn" type="button" data-close>キャンセル</button>
+        <button class="btn btn-primary" value="ok">登録する</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 写真取り込み -->
+  <dialog class="dialog" id="photoDialog">
+    <form method="dialog" class="dialog-inner">
+      <header class="dialog-head">
+        <h2>写真から単語を取り込む</h2>
+        <button class="icon-btn" type="button" data-close aria-label="閉じる"><svg class="i"><use href="#i-close"/></svg></button>
+      </header>
+      <label class="drop" id="drop">
+        <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
+        <img id="photoPreview" alt="" hidden>
+        <span id="dropText">手書きノートの写真を撮る / 選ぶ</span>
+      </label>
+      <div id="photoResult" hidden>
+        <p class="hint">見つかった単語 (ノートに入れるものを選択)</p>
+        <ul class="word-list" id="wordList"></ul>
+      </div>
+      <footer class="dialog-foot">
+        <button class="btn" type="button" data-close>キャンセル</button>
+        <button class="btn btn-primary" id="photoAdd" type="button" disabled>ノートに追加</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- AI を使う前の確認 (テスト・説明チェック・要点・写真で共用) -->
+  <dialog class="dialog" id="aiConfirm">
+    <form method="dialog" class="dialog-inner">
+      <header class="dialog-head">
+        <h2 id="aiConfirmTitle">AIで問題を作成しますか？</h2>
+        <button class="icon-btn" type="button" data-close aria-label="閉じる"><svg class="i"><use href="#i-close"/></svg></button>
+      </header>
+      <div class="ai-confirm-body">
+        <p id="aiConfirmText"></p>
+        <p class="hint" id="aiConfirmNote"></p>
+      </div>
+      <footer class="dialog-foot">
+        <button class="btn" type="button" data-close>キャンセル</button>
+        <button class="btn btn-primary" value="ok" id="aiConfirmOk">作成する</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 科目・単元の名前 -->
+  <dialog class="dialog" id="nameDialog">
+    <form method="dialog" class="dialog-inner">
+      <header class="dialog-head">
+        <h2 id="nameTitle">科目を追加</h2>
+        <button class="icon-btn" type="button" data-close aria-label="閉じる"><svg class="i"><use href="#i-close"/></svg></button>
+      </header>
+      <label class="field"><span id="nameLabel">名前</span>
+        <input id="nameInput" type="text" maxlength="40" required autocomplete="off">
+      </label>
+      <footer class="dialog-foot">
+        <button class="btn" type="button" data-close>キャンセル</button>
+        <button class="btn btn-primary" value="ok" id="nameOk">追加する</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ノートの移動 -->
+  <dialog class="dialog" id="moveDialog">
+    <form method="dialog" class="dialog-inner">
+      <header class="dialog-head">
+        <h2>ノートを移動</h2>
+        <button class="icon-btn" type="button" data-close aria-label="閉じる"><svg class="i"><use href="#i-close"/></svg></button>
+      </header>
+      <p class="hint" id="moveNoteName"></p>
+      <label class="field"><span>移動先</span>
+        <select id="moveSelect"></select>
+      </label>
+      <footer class="dialog-foot">
+        <button class="btn" type="button" data-close>キャンセル</button>
+        <button class="btn btn-primary" value="ok">移動する</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 削除の確認 -->
+  <dialog class="dialog" id="confirmDialog">
+    <form method="dialog" class="dialog-inner">
+      <header class="dialog-head">
+        <h2 id="confirmTitle">削除</h2>
+        <button class="icon-btn" type="button" data-close aria-label="閉じる"><svg class="i"><use href="#i-close"/></svg></button>
+      </header>
+      <p id="confirmBody"></p>
+      <footer class="dialog-foot">
+        <button class="btn" type="button" data-close>キャンセル</button>
+        <button class="btn btn-primary" value="ok" id="confirmOk">削除する</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- 科目・単元・ノートの「…」メニュー / ツールボックスのプルダウン -->
+  <div class="menu" id="ctxMenu" role="menu" hidden></div>
+  <div class="pop" id="pop" role="menu" hidden></div>
+
+  <!-- 画面の動き (保存・ツリー・ツールボックス・復習など) -->
+  <script type="module" src="app.js"></script>
+</body>
+</html>

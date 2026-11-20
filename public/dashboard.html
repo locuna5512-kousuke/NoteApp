@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ホーム | 学習伴走ノート</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+<style>
+/* ---------- ホーム画面だけのスタイル (共通部分は styles.css) ---------- */
+
+/* 中央パネル: 色の付いた科目カード */
+.subjects { display: grid; gap: 16px; }
+.subject {
+  --c: var(--primary); --fg: #fff;
+  display: grid; grid-template-columns: 64px minmax(0, 1fr) 52px; gap: 6px 14px;
+  padding: 18px 18px 14px;
+  border-radius: 22px;
+  background: var(--c); color: var(--fg);
+  box-shadow: 0 14px 26px color-mix(in srgb, var(--c) 35%, transparent);
+  transition: transform .15s;
+}
+.subject:hover { transform: translateY(-2px); }
+/* 4枚ごとに色を変える */
+.subject:nth-child(4n+2) { --c: var(--purple); }
+.subject:nth-child(4n+3) { --c: var(--yellow); --fg: #1b2233; }
+.subject:nth-child(4n+4) { --c: var(--coral); }
+/* 左上の絵の枠 */
+.subject .art {
+  grid-row: span 2; align-self: start;
+  display: grid; place-items: center;
+  width: 64px; height: 64px; border-radius: 18px;
+  background: rgba(255, 255, 255, .22);
+}
+.subject .art svg.i { width: 30px; height: 30px; stroke-width: 1.5; }
+.subject h3 { font-size: 14px; font-weight: 600; line-height: 1.35; }
+.subject .desc { font-size: 11px; opacity: .85; line-height: 1.45; }
+/* 右上のノート数 */
+.subject .count {
+  grid-column: 3; grid-row: 1 / span 2; align-self: start;
+  display: grid; justify-items: center;
+  font-size: 10px; opacity: .95;
+}
+.subject .count b {
+  display: grid; place-items: center;
+  width: 46px; height: 46px; margin-bottom: 4px; border-radius: 12px;
+  background: #fff; color: #1b2233; font-size: 18px; font-weight: 600;
+}
+/* 下段: 進み具合のバーと「開く」 */
+.subject .foot { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; margin-top: 10px; font-size: 11.5px; font-weight: 600; }
+.subject .bar { flex: 1; height: 4px; border-radius: 999px; background: rgba(255, 255, 255, .35); overflow: hidden; }
+.subject:nth-child(4n+3) .bar { background: rgba(27, 34, 51, .15); }
+.subject .bar i { display: block; height: 100%; border-radius: inherit; background: currentColor; }
+.subject .go { display: inline-flex; align-items: center; gap: 6px; }
+
+/* 右: 学習中のノート (参考画像の My learning) */
+.learning { display: grid; gap: 16px; }
+.learn { display: grid; grid-template-columns: 46px minmax(0, 1fr) 44px; gap: 14px; align-items: center; }
+.learn .ic { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 14px; background: color-mix(in srgb, var(--c) 14%, var(--board)); color: var(--c); }
+/* 行ごとにアイコンの色を変える */
+.learn:nth-child(4n+1) { --c: var(--primary); }
+.learn:nth-child(4n+2) { --c: var(--purple); }
+.learn:nth-child(4n+3) { --c: var(--coral); }
+.learn:nth-child(4n+4) { --c: var(--green); }
+.learn h3 { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.learn p { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.learn:hover h3 { color: var(--primary); }
+/* 正答率の円グラフ */
+.ring { width: 44px; height: 44px; position: relative; }
+.ring svg { width: 44px; height: 44px; transform: rotate(-90deg); }
+.ring .track { fill: none; stroke: var(--line); stroke-width: 3; }
+.ring .val { fill: none; stroke: var(--c); stroke-width: 3; stroke-linecap: round; }
+.ring b { position: absolute; inset: 0; display: grid; place-items: center; font-size: 10.5px; font-weight: 600; }
+
+/* 右: 予定 (参考画像の Planning) */
+/* 今週 / 来週 / 今月 のタブ */
+.plan-tabs { display: flex; gap: 26px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.plan-tabs button { padding: 6px 0 8px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none; font-size: 12.5px; color: var(--faint); font-weight: 500; }
+.plan-tabs button[aria-selected="true"] { color: var(--ink); font-weight: 600; border-bottom-color: var(--primary); }
+.plan-tabs button:hover { color: var(--ink); }
+/* 週表示: 曜日 × 時刻の表 */
+.gantt { position: relative; display: grid; grid-template-columns: 46px repeat(7, minmax(0, 1fr)); }
+.gantt .dh { padding: 10px 0 8px; text-align: center; font-size: 11.5px; font-weight: 600; }
+.gantt .dh.today { color: var(--primary); }
+.gantt .dh small { display: block; font-size: 10px; font-weight: 400; color: var(--muted); }
+.gantt .body { grid-column: 1 / -1; position: relative; display: grid; grid-template-columns: 46px repeat(7, minmax(0, 1fr)); }
+.gantt .tl { font-size: 10px; color: var(--faint); height: 30px; padding-top: 2px; font-variant-numeric: tabular-nums; }
+.gantt .col { grid-row: 1 / span 8; border-left: 1px dashed var(--line); }
+.gantt .col.today { background: color-mix(in srgb, var(--primary) 5%, transparent); }
+/* 予定のバー (種類ごとに色分け) */
+.bar-ev {
+  position: absolute; height: 10px; border-radius: 999px;
+  background: var(--c); border: 0; padding: 0;
+}
+.bar-ev:hover, .bar-ev:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
+.bar-ev.k-授業 { --c: var(--green); }
+.bar-ev.k-小テスト { --c: var(--purple); }
+.bar-ev.k-課題 { --c: #c9d3e6; }
+.bar-ev.k-試験 { --c: var(--coral); }
+.bar-ev.k-自習 { --c: var(--yellow); }
+/* 課題の締め切りを出す吹き出し */
+.bubble {
+  position: absolute; z-index: 2; transform: translate(-50%, 8px);
+  max-width: 160px; padding: 8px 10px; border-radius: 10px;
+  background: #fff8d6; color: #1b2233; box-shadow: 0 8px 20px rgba(36, 56, 110, .15);
+  font-size: 11px; line-height: 1.4; text-align: center; pointer-events: none;
+}
+.bubble b { display: block; font-size: 11.5px; }
+/* 色の凡例 */
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 14px; height: 6px; border-radius: 3px; background: var(--c); }
+/* 月表示のカレンダー (予定がある日は点を付ける) */
+.month { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.month .dow { font-size: 10.5px; color: var(--muted); padding: 6px 0; }
+.month button { position: relative; height: 34px; border: 0; border-radius: 10px; background: none; font-size: 12px; font-variant-numeric: tabular-nums; }
+.month button:hover { background: var(--panel); }
+.month button.other { color: var(--faint); }
+.month button.today { background: var(--primary); color: #fff; font-weight: 600; }
+.month button.ev::after { content: ""; position: absolute; left: 50%; bottom: 4px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--coral); }
+
+/* 右: 学習の記録 */
+.record { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 26px; }
+.record-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+/* 切り替えボタン (指標 / 期間) */
+.seg { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--panel); }
+.seg button { border: 0; border-radius: 8px; padding: 3px 10px; background: none; font-size: 11.5px; color: var(--muted); font-weight: 500; white-space: nowrap; }
+.seg button[aria-pressed="true"] { background: var(--board); color: var(--ink); font-weight: 600; box-shadow: 0 2px 6px rgba(36, 56, 110, .08); }
+/* グラフ本体 (SVG) */
+.plot { position: relative; }
+.plot svg { display: block; width: 100%; overflow: visible; }
+.plot .axis { font-size: 10px; fill: var(--muted); font-family: var(--font); }
+.plot .grid { stroke: var(--line); stroke-width: 1; }
+.plot .bar { fill: var(--primary-soft); }
+.plot .bar.today { fill: var(--primary); }
+.plot .goal-line { stroke: var(--coral); stroke-width: 1.3; stroke-dasharray: 4 4; }
+.plot .line { fill: none; stroke: var(--primary); stroke-width: 2.4; stroke-linejoin: round; stroke-linecap: round; }
+.plot .dot { fill: var(--board); stroke: var(--primary); stroke-width: 2; }
+.plot .dot.today { fill: var(--primary); }
+.plot .hit { fill: transparent; }
+/* グラフにマウスを乗せたときの数値表示 */
+.tip {
+  position: absolute; z-index: 2; pointer-events: none;
+  transform: translate(-50%, -100%); margin-top: -10px;
+  padding: 4px 9px; border-radius: 8px; background: var(--dark); color: #fff;
+  font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+/* 目標の一覧 */
+.goals { display: grid; gap: 14px; align-content: start; }
+/* グラフ下の数字 (今週 / 連続学習 / 正答率) */
+.kpis { display: flex; gap: 24px; margin-top: 8px; }
+.kpi .k-label { font-size: 11px; color: var(--muted); }
+.kpi .k-val { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.kpi .k-val small { font-size: 11px; margin-left: 2px; color: var(--muted); font-weight: 400; }
+
+/* 右側のセクションを縦に並べる */
+.right-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 30px; }
+
+/* ダイアログの選択肢 */
+.pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.pills label { cursor: pointer; }
+.pills input { position: absolute; opacity: 0; pointer-events: none; }
+.pills span { display: inline-block; padding: 5px 12px; border-radius: 10px; background: var(--panel); font-size: 12px; font-weight: 500; }
+.pills input:checked + span { background: var(--primary); color: #fff; }
+.pills input:focus-visible + span { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* 2列の入力欄 */
+.fields-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.toggle { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+
+/* 画面幅が狭いとき: グラフと目標を縦に並べる */
+@media (max-width: 1280px) {
+  .record { grid-template-columns: 1fr; }
+}
+/* スマホ: パネルを全幅にし、上のバーを隠す */
+@media (max-width: 860px) {
+  .page-home .panel { margin: 0; border-radius: 0 0 28px 28px; overflow: visible; padding: 22px 16px 24px; }
+  .page-home .main { overflow: visible; padding: 22px 16px 24px; }
+  .page-home .main .topbar { display: none; }
+  .gantt .tl { font-size: 9px; }
+  .gantt .dh { font-size: 10.5px; }
+}
+</style>
+</head>
+<body class="page-home">
+
+<!-- アイコン集 (use href="#i-..." で使い回す) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 16 16"><path d="M2 7.5 8 2.5l6 5V14H10v-4H6v4H2z"/></symbol>
+  <symbol id="i-note" viewBox="0 0 16 16"><path d="M3.5 1.5h6l3 3v10h-9z M9.5 1.5v3h3 M5.5 8h5 M5.5 11h3.5"/></symbol>
+  <symbol id="i-test" viewBox="0 0 16 16"><path d="M3 2.5h10v11H3z M5.5 6l1.2 1.2L9 5 M5.5 10.5h5"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 16 16"><path d="M2.5 3.5h11v10h-11z M2.5 6.5h11 M5.5 2v3 M10.5 2v3"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 16 16"><path d="M2 14h12 M4 11V8 M8 11V4 M12 11V6.5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10 M3 8h10"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 16 16"><path d="M6 3l5 5-5 5"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M2.5 8h11 M10 4.5 13.5 8 10 11.5"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 16 16"><path d="M4 11V7a4 4 0 0 1 8 0v4l1.2 1.5H2.8z M6.5 14h3"/></symbol>
+  <symbol id="i-close" viewBox="0 0 16 16"><path d="M3.5 3.5l9 9 M12.5 3.5l-9 9"/></symbol>
+  <!-- 科目カードの絵 -->
+  <symbol id="a-net" viewBox="0 0 32 32"><circle cx="16" cy="7" r="3.5"/><circle cx="6" cy="24" r="3.5"/><circle cx="26" cy="24" r="3.5"/><path d="M14 10 8 21 M18 10l6 11 M9.5 24h13"/></symbol>
+  <symbol id="a-book" viewBox="0 0 32 32"><path d="M4 7c4-2 8-2 12 1 4-3 8-3 12-1v18c-4-2-8-2-12 1-4-3-8-3-12-1z M16 8v18"/></symbol>
+  <symbol id="a-abc" viewBox="0 0 32 32"><path d="M3 23 8.5 9h1L15 23 M5 18.5h9 M18 9h5.5a3.5 3.5 0 0 1 0 7H18z M18 16h6.5a3.5 3.5 0 0 1 0 7H18z"/></symbol>
+  <symbol id="a-calc" viewBox="0 0 32 32"><path d="M7 3h18v26H7z M10 7h12v5H10z M11 17h1 M16 17h1 M21 17h1 M11 22h1 M16 22h1 M21 22h1"/></symbol>
+</svg>
+
+<!-- 画面全体: 左メニュー / 中央パネル / 右 の3列 -->
+<div class="app">
+
+  <!-- 左: メニュー -->
+  <aside class="sidebar">
+    <a class="brand" href="dashboard.html"><span class="brand-mark" aria-hidden="true"></span>学習伴走ノート</a>
+    <nav class="nav" aria-label="画面の切り替え">
+      <a href="dashboard.html" aria-current="page" title="ホーム"><span class="ico"><svg class="i"><use href="#i-home"/></svg></span>ホーム</a>
+      <a href="index.html" title="ノート"><span class="ico"><svg class="i"><use href="#i-note"/></svg></span>ノート</a>
+      <button type="button" data-open="testDialog" title="テスト"><span class="ico"><svg class="i"><use href="#i-test"/></svg></span>テスト</button>
+      <a href="#schedule" title="予定"><span class="ico"><svg class="i"><use href="#i-cal"/></svg></span>予定</a>
+      <a href="#record" title="学習の記録"><span class="ico"><svg class="i"><use href="#i-chart"/></svg></span>学習の記録</a>
+    </nav>
+    <!-- 試験までの日数 -->
+    <div class="help-card">
+      <h3>試験まで <b id="examLeft"></b></h3>
+      <p id="examName"></p>
+      <button class="btn btn-primary" type="button" data-open="goalDialog" style="margin-top:12px;min-height:30px;padding:4px 12px;font-size:11.5px">目標を変える</button>
+    </div>
+  </aside>
+
+  <!-- 中央パネル: 学習アクティビティ / 科目 -->
+  <section class="panel" aria-label="科目">
+    <!-- 見出しと日付 / 新しいノートボタン -->
+    <div class="panel-head">
+      <div>
+        <h1>学習アクティビティ</h1>
+        <p class="date" id="todayText"></p>
+      </div>
+      <a class="plus-btn" href="index.html#new" aria-label="新しいノート" title="新しいノート"><svg class="i"><use href="#i-plus"/></svg></a>
+    </div>
+    <!-- 科目カード (中身は JS で作る) -->
+    <div>
+      <div class="sec-head">
+        <h2>科目</h2>
+        <span class="hint" id="subjectCount"></span>
+      </div>
+      <div class="subjects" id="subjects"></div>
+    </div>
+  </section>
+
+  <!-- 右 -->
+  <div class="main">
+    <!-- 上のバー: 通知とアカウント -->
+    <div class="topbar">
+      <a class="round-btn bell" id="bell" href="#schedule" aria-label="予定" title="予定"><svg class="i"><use href="#i-bell"/></svg></a>
+      <div class="user">
+        <div class="who">
+          <span class="account-name" id="accountName"></span>
+          <span class="role" id="accountRole"></span>
+        </div>
+        <button class="btn" id="registerBtn" type="button" hidden>登録</button>
+        <div class="avatar" id="avatar" aria-hidden="true"></div>
+      </div>
+    </div>
+
+    <div class="right-grid">
+      <!-- 学習中のノート -->
+      <section id="test">
+        <div class="sec-head">
+          <h2>学習中のノート</h2>
+          <button class="btn btn-text" type="button" data-open="testDialog">テストを作る</button>
+        </div>
+        <div class="learning" id="learning"></div>
+      </section>
+
+      <!-- 予定 -->
+      <section id="schedule">
+        <div class="sec-head">
+          <h2>予定</h2>
+          <div class="arrows">
+            <button class="prev" type="button" id="planPrev" aria-label="前へ"><svg class="i"><use href="#i-chev"/></svg></button>
+            <button type="button" id="planNext" aria-label="次へ"><svg class="i"><use href="#i-chev"/></svg></button>
+          </div>
+          <span style="flex:1"></span>
+          <button class="btn btn-text" type="button" data-open="eventDialog">＋ 追加</button>
+        </div>
+        <!-- 期間のタブ -->
+        <div class="plan-tabs" role="tablist" aria-label="期間">
+          <button type="button" role="tab" data-plan="0" aria-selected="true">今週</button>
+          <button type="button" role="tab" data-plan="1" aria-selected="false">来週</button>
+          <button type="button" role="tab" data-plan="month" aria-selected="false">今月</button>
+        </div>
+        <!-- 週の表 / 月のカレンダー (JS で描く) -->
+        <div id="plan"></div>
+        <!-- 色の凡例 -->
+        <div class="legend">
+          <span style="--c:var(--green)"><i></i>授業</span>
+          <span style="--c:var(--purple)"><i></i>小テスト</span>
+          <span style="--c:#c9d3e6"><i></i>課題</span>
+          <span style="--c:var(--coral)"><i></i>試験</span>
+          <span style="--c:var(--yellow)"><i></i>自習</span>
+        </div>
+      </section>
+
+      <!-- 学習の記録 -->
+      <section id="record">
+        <div class="sec-head">
+          <h2>学習の記録</h2>
+          <!-- 指標の切り替え -->
+          <div class="seg" role="group" aria-label="表示する指標">
+            <button type="button" data-metric="time" aria-pressed="true">学習時間</button>
+            <button type="button" data-metric="acc" aria-pressed="false">正答率</button>
+          </div>
+        </div>
+        <div class="record">
+          <!-- 左: グラフと数字 -->
+          <div>
+            <div class="record-head">
+              <span class="hint" id="chartNote"></span>
+              <div class="seg" role="group" aria-label="期間">
+                <button type="button" data-range="7" aria-pressed="true">1週間</button>
+                <button type="button" data-range="14" aria-pressed="false">2週間</button>
+                <button type="button" data-range="30" aria-pressed="false">1か月</button>
+              </div>
+            </div>
+            <!-- グラフ (JS で SVG を描く) とツールチップ -->
+            <div class="plot" id="plot"><div class="tip" id="tip" hidden></div></div>
+            <div class="kpis">
+              <div class="kpi"><div class="k-label">今週</div><div class="k-val" id="kWeek"></div></div>
+              <div class="kpi"><div class="k-label">連続学習</div><div class="k-val" id="kStreak"></div></div>
+              <div class="kpi"><div class="k-label">正答率</div><div class="k-val" id="kAcc"></div></div>
+            </div>
+          </div>
+          <!-- 右: 目標の進み具合 -->
+          <div class="goals">
+            <div class="sec-head" style="margin:0"><h2 style="font-size:13px">目標</h2>
+              <button class="btn btn-text" type="button" data-open="goalDialog">変更</button>
+            </div>
+            <div class="goals" id="goalList"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- スマホ用タブ -->
+<nav class="tabbar" aria-label="画面の切り替え" style="--tabs:4">
+  <a href="dashboard.html" aria-current="page"><svg class="i"><use href="#i-home"/></svg>ホーム</a>
+  <a href="index.html"><svg class="i"><use href="#i-note"/></svg>ノート</a>
+  <a href="#" data-open="testDialog"><svg class="i"><use href="#i-test"/></svg>テスト</a>
+  <a href="#schedule"><svg class="i"><use href="#i-cal"/></svg>予定</a>
+</nav>
+
+<!-- テストを作る -->
+<dialog class="dialog" id="testDialog">
+  <form method="dialog" class="dialog-inner">
+    <header class="dialog-head"><h2>テストを作る</h2><button class="icon-btn" type="button" data-close aria-label="閉じる"><svg class="i"><use href="#i-close"/></svg></button></header>
+    <div class="field"><span>科目</span><div class="pills" id="testSubjects"></div></div>
+    <div class="slider">
+      <div class="slider-head"><span>問題数</span><b id="countLabel">10問</b></div>
+      <input type="range" id="countRange" min="5" max="30" step="5" value="10" aria-label="問題数">
+    </div>
+    <div class="field"><span>形式</span>
+      <div class="pills">
+        <label><input type="radio" name="type" value="choice" checked><span>選択式</span></label>
+        <label><input type="radio" name="type" value="write"><span>記述式</span></label>
+        <label><input type="radio" name="type" value="explain"><span>自分の言葉で説明</span></label>
+      </div>
+    </div>
+    <label class="toggle"><input type="checkbox" checked> まちがえた用語を多めに出す</label>
+    <footer class="dialog-foot">
+      <button class="btn" type="button" data-close>キャンセル</button>
+      <button class="btn btn-primary" value="ok">テストを始める</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- 目標の設定 -->
+<dialog class="dialog" id="goalDialog">
+  <form method="dialog" class="dialog-inner">
+    <header class="dialog-head"><h2>目標</h2><button class="icon-btn" type="button" data-close aria-label="閉じる"><svg class="i"><use href="#i-close"/></svg></button></header>
+    <div class="fields-2">
+      <label class="field"><span>試験・テストの名前</span><input id="gExamName" type="text"></label>
+      <label class="field"><span>日付</span><input id="gExamDate" type="date"></label>
+    </div>
+    <div class="slider">
+      <div class="slider-head"><span>1週間の学習時間</span><b id="gWeekLabel"></b></div>
+      <input type="range" id="gWeekHours" min="1" max="30" step="1" aria-label="1週間の学習時間">
+    </div>
+    <div class="slider">
+      <div class="slider-head"><span>1日の復習</span><b id="gWordsLabel"></b></div>
+      <input type="range" id="gDailyWords" min="5" max="100" step="5" aria-label="1日の復習の語数">
+    </div>
+    <div class="slider">
+      <div class="slider-head"><span>目標の正答率</span><b id="gAccLabel"></b></div>
+      <input type="range" id="gAcc" min="50" max="100" step="5" aria-label="目標の正答率">
+    </div>
+    <footer class="dialog-foot">
+      <button class="btn" type="button" data-close>キャンセル</button>
+      <button class="btn btn-primary" value="ok">保存する</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- 予定の追加 -->
+<dialog class="dialog" id="eventDialog">
+  <form method="dialog" class="dialog-inner">
+    <header class="dialog-head"><h2>予定を追加</h2><button class="icon-btn" type="button" data-close aria-label="閉じる"><svg class="i"><use href="#i-close"/></svg></button></header>
+    <label class="field"><span>タイトル</span><input id="eTitle" type="text" placeholder="例: ネットワーク 小テスト"></label>
+    <div class="fields-2">
+      <label class="field"><span>日付</span><input id="eDate" type="date"></label>
+      <label class="field"><span>時刻</span><input id="eTime" type="time" value="09:00"></label>
+    </div>
+    <div class="slider">
+      <div class="slider-head"><span>期間</span><b id="eDaysLabel">1日</b></div>
+      <input type="range" id="eDays" min="1" max="7" step="1" value="1" aria-label="期間 (日数)">
+    </div>
+    <div class="field"><span>種類</span>
+      <div class="pills">
+        <label><input type="radio" name="kind" value="授業" checked><span>授業</span></label>
+        <label><input type="radio" name="kind" value="小テスト"><span>小テスト</span></label>
+        <label><input type="radio" name="kind" value="課題"><span>課題</span></label>
+        <label><input type="radio" name="kind" value="試験"><span>試験</span></label>
+        <label><input type="radio" name="kind" value="自習"><span>自習</span></label>
+      </div>
+    </div>
+    <footer class="dialog-foot">
+      <button class="btn" type="button" data-close>キャンセル</button>
+      <button class="btn btn-primary" value="ok">追加する</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- アカウント登録 (仮: アカウント名をこの端末に保存するだけ) -->
+<dialog class="dialog" id="accountDialog">
+  <form method="dialog" class="dialog-inner">
+    <header class="dialog-head"><h2>アカウント登録</h2><button class="icon-btn" type="button" data-close aria-label="閉じる"><svg class="i"><use href="#i-close"/></svg></button></header>
+    <label class="field"><span>アカウント名</span><input id="accountInput" type="text" maxlength="20" required autocomplete="nickname"></label>
+    <footer class="dialog-foot">
+      <button class="btn" type="button" data-close>キャンセル</button>
+      <button class="btn btn-primary" value="ok">登録する</button>
+    </footer>
+  </form>
+</dialog>
+
+<!-- 画面下に出る短いお知らせ -->
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+// ホーム (ダッシュボード) のモック。
+// 科目・ノート・用語・アカウント名はノート画面と同じ保存データ (noteapp.v2) を読む。
+// 学習時間・正答率・ノートごとの正答率・予定はサンプルの数字。
+// よく使う小さな関数 (要素の取得・日付・エスケープなど)
+const $ = (s) => document.querySelector(s);
+const DAY = 86400000;
+const TODAY = new Date(); TODAY.setHours(0, 0, 0, 0);
+const addDays = (d, n) => new Date(d.getTime() + n * DAY);
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const WD = ['日', '月', '火', '水', '木', '金', '土'];
+const md = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// ノート本文の「- **用語**: 説明」の行から用語を取り出す
+const parseTerms = (body) => [...(body || '').matchAll(/^\s*[-*]\s+(?:\[[ x]\]\s+)?\*\*(.+?)\*\*\s*[:：]\s*(.+)$/gm)].map((m) => ({ term: m[1].trim(), desc: m[2].trim() }));
+
+// ---------- 保存データ (ノート画面と共通) ----------
+const STORAGE_KEY = 'noteapp.v2';
+// 保存データがないときに使うサンプル
+const FALLBACK = {
+  name: '',
+  subjects: [
+    { id: 's1', name: '基本情報技術者', units: [{ id: 'u1', name: 'ネットワーク' }, { id: 'u2', name: 'データベース' }] },
+    { id: 's2', name: '簿記2級', units: [{ id: 'u3', name: '仕訳' }] },
+    { id: 's3', name: 'TOEIC', units: [] },
+  ],
+  notes: [
+    { id: 'n5', subjectId: 's1', unitId: 'u1', title: 'OSI参照モデル', updated: '2026-11-15', body: '- **物理層**: ビット列を電気信号や光に変えて送る層\n- **データリンク層**: 隣り合う機器同士の通信を担う層\n- **ネットワーク層**: 宛先までの経路を選ぶ層\n- **トランスポート層**: 通信の信頼性を確保する層' },
+    { id: 'n1', subjectId: 's1', unitId: 'u1', title: 'ネットワークの基礎', updated: '2026-11-12', body: '- **TCP**: 接続を確立して届けるプロトコル\n- **UDP**: 速度を優先するプロトコル\n- **HTTP**: Webページをやり取りするプロトコル\n- **DNS**: ドメイン名をIPアドレスに変換する仕組み\n- **IPアドレス**: 機器を識別する番号\n- **MACアドレス**: 機器固有の番号\n- **サブネットマスク**: ネットワーク部とホスト部を区切る値\n- **DHCP**: IPアドレスを自動で割り当てる仕組み' },
+    { id: 'n2', subjectId: 's1', unitId: 'u2', title: 'データベース', updated: '2026-11-10', body: '- **主キー**: 行を一意に識別する列\n- **外部キー**: 他の表の主キーを参照する列\n- **正規化**: 重複をなくすために表を分割する手法\n- **インデックス**: 検索を速くする索引\n- **SQL**: データベースを操作する言語\n- **トランザクション**: ひとまとまりの処理の単位' },
+    { id: 'n3', subjectId: 's2', unitId: 'u3', title: '仕訳の基本', updated: '2026-11-08', body: '- **借方**: 仕訳の左側\n- **貸方**: 仕訳の右側\n- **資産**: 会社が持っている財産\n- **負債**: 将来支払う義務\n- **純資産**: 資産から負債を差し引いた残り\n- **減価償却**: 取得原価を使用期間で費用にする手続き' },
+    { id: 'n4', subjectId: 's3', unitId: null, title: 'Part5 頻出単語', updated: '2026-11-05', body: '- **allocate**: 割り当てる\n- **comply**: 従う\n- **reimburse**: 払い戻す\n- **postpone**: 延期する\n- **eligible**: 資格がある' },
+  ],
+};
+// localStorage から読む (読めなければ null)
+function loadData() {
+  try {
+    const v = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    if (v && Array.isArray(v.subjects) && Array.isArray(v.notes)) return v;
+  } catch { /* 読めなければサンプル */ }
+  return null;
+}
+const data = loadData() || structuredClone(FALLBACK);
+// 更新日が新しい順のノート / ノートの科目
+const byUpdated = () => [...data.notes].sort((a, b) => b.updated.localeCompare(a.updated));
+const subjectOf = (n) => data.subjects.find((s) => s.id === n.subjectId);
+// アカウント名を保存 (ほかの保存データはそのまま残す)
+function saveName(name) {
+  data.name = name;
+  try {
+    const cur = loadData() || structuredClone(FALLBACK);
+    cur.name = name;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(cur));
+  } catch { /* 保存できなくても表示は変える */ }
+}
+
+// ---------- サンプルの記録 ----------
+// 直近30日分の学習時間 (分) と正答率 (%)。null はテストなし
+const MINUTES = [35,50,0,70,45,90,60, 20,55,80,0,65,40,95, 75,30,60,85,0,50,70, 110,45,65,80,25,90,40,70,30];
+const ACCURACY = [62,64,null,66,61,70,68, 65,69,72,null,70,71,74, 73,70,75,76,null,74,77, 79,76,78,80,77,81,79,82,80];
+// ノートごとの正答率 (サンプル)。ID から決まった値を出す
+const noteAcc = (id) => [53, 75, 14, 88, 62, 41, 70][[...id].reduce((a, c) => a + c.charCodeAt(0), 0) % 7];
+// 目標と予定 (サンプル)
+const goals = { examName: '基本情報技術者試験', examDate: iso(addDays(TODAY, 66)), weekHours: 8, dailyWords: 20, acc: 80 };
+const events = [
+  { date: iso(TODAY), time: '13:00', days: 1, title: 'ネットワーク 第6回', kind: '授業' },
+  { date: iso(addDays(TODAY, 1)), time: '09:00', days: 1, title: 'データベース 小テスト', kind: '小テスト' },
+  { date: iso(addDays(TODAY, -1)), time: '17:00', days: 4, title: '簿記 仕訳練習', kind: '課題', note: '金曜 23:59 提出' },
+  { date: iso(addDays(TODAY, 5)), time: '10:00', days: 1, title: 'TOEIC 模試', kind: '試験' },
+  { date: iso(addDays(TODAY, -2)), time: '21:00', days: 6, title: '単語の復習 (毎晩)', kind: '自習' },
+];
+// 画面の表示状態 (指標・期間・予定タブ・月のずれ)
+const view = { metric: 'time', range: 7, plan: 0, monthOffset: 0 };
+// 合計・平均・今週の学習時間・試験までの日数
+const sum = (a) => a.reduce((x, y) => x + y, 0);
+const avg = (a) => Math.round(sum(a) / a.length);
+const weekMin = () => sum(MINUTES.slice(-7));
+const examLeft = () => Math.round((new Date(goals.examDate + 'T00:00') - TODAY) / DAY);
+
+// ---------- 見出し / 左下 ----------
+function renderTop() {
+  $('#todayText').textContent = `${TODAY.getFullYear()}年${TODAY.getMonth() + 1}月${TODAY.getDate()}日 (${WD[TODAY.getDay()]})`;
+  $('#examLeft').textContent = `${examLeft()}日`;
+  $('#examName').textContent = goals.examName;
+  $('#bell').classList.toggle('has-dot', events.some((e) => e.date === iso(TODAY)));
+}
+
+// ---------- 中央: 科目カード ----------
+// 科目カードの絵 (順番に使う)
+const ARTS = ['a-net', 'a-book', 'a-abc', 'a-calc'];
+function renderSubjects() {
+  $('#subjectCount').textContent = `${data.subjects.length}科目`;
+  $('#subjects').innerHTML = data.subjects.map((s, i) => {
+    const notes = data.notes.filter((n) => n.subjectId === s.id).sort((a, b) => b.updated.localeCompare(a.updated));
+    const terms = sum(notes.map((n) => parseTerms(n.body).length));
+    const ready = notes.filter((n) => parseTerms(n.body).length >= 4).length;
+    const href = notes[0] ? `index.html#${notes[0].id}` : 'index.html';
+    const units = (s.units || []).map((u) => u.name);
+    return `
+      <a class="subject" href="${href}">
+        <span class="art"><svg class="i"><use href="#${ARTS[i % ARTS.length]}"/></svg></span>
+        <h3>${esc(s.name)}</h3>
+        <p class="desc">${units.length ? esc(units.join('・')) : '単元なし'} ・ 用語 ${terms}語</p>
+        <span class="count"><b>${notes.length}</b>ノート</span>
+        <div class="foot">
+          <span class="bar" title="テストを作れるノート ${ready}/${notes.length}"><i style="width:${notes.length ? ready / notes.length * 100 : 0}%"></i></span>
+          <span class="go">開く<svg class="i"><use href="#i-arrow"/></svg></span>
+        </div>
+      </a>`;
+  }).join('') || '<p class="hint">科目はノート画面で追加できます</p>';
+  // テストダイアログの科目の選択肢も作る
+  $('#testSubjects').innerHTML = data.subjects.map((s, i) => `<label><input type="checkbox" ${i === 0 ? 'checked' : ''}><span>${esc(s.name)}</span></label>`).join('');
+}
+
+// ---------- 右: 学習中のノート ----------
+function renderLearning() {
+  const notes = byUpdated().slice(0, 4);
+  // 円の周の長さ (円グラフの計算用)
+  const C = 2 * Math.PI * 18;
+  $('#learning').innerHTML = notes.map((n) => {
+    const a = noteAcc(n.id);
+    const t = parseTerms(n.body);
+    return `
+      <a class="learn" href="index.html#${n.id}">
+        <span class="ic"><svg class="i" style="width:20px;height:20px"><use href="#i-note"/></svg></span>
+        <span style="min-width:0"><h3>${esc(n.title || '無題のノート')}</h3>
+          <p>${esc(subjectOf(n)?.name ?? '未分類')} ・ ${t.slice(0, 3).map((x) => esc(x.term)).join('、') || '用語なし'}</p></span>
+        <span class="ring" title="正答率 ${a}% (サンプル)"><svg viewBox="0 0 44 44"><circle class="track" cx="22" cy="22" r="18"/><circle class="val" cx="22" cy="22" r="18" stroke-dasharray="${C * a / 100} ${C}"/></svg><b>${a}%</b></span>
+      </a>`;
+  }).join('') || '<p class="hint">ノートがまだありません</p>';
+}
+
+// ---------- 右: 予定 (週のバー / 月のカレンダー) ----------
+// 週の始まり (月曜) を求める
+const startOfWeek = (d) => addDays(d, -((d.getDay() + 6) % 7));
+function renderPlan() {
+  // タブの選択状態をそろえる
+  document.querySelectorAll('[data-plan]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.plan) === String(view.plan)));
+  if (view.plan === 'month') return renderMonth();
+  // 週表示: 曜日の見出し・時刻・列を作る
+  const start = addDays(startOfWeek(TODAY), view.plan * 7);
+  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  const H0 = 8, H1 = 23, ROWS = 8; // 8時〜23時を8段で
+  const rowH = 30;
+  let html = '<div class="gantt"><span></span>' + days.map((d) => `<span class="dh ${iso(d) === iso(TODAY) ? 'today' : ''}">${WD[d.getDay()]}<small>${md(d)}</small></span>`).join('');
+  html += '<div class="body" id="ganttBody">';
+  for (let r = 0; r < ROWS; r++) html += `<span class="tl" style="grid-row:${r + 1};grid-column:1">${String(H0 + Math.round(r * (H1 - H0) / ROWS)).padStart(2, '0')}:00</span>`;
+  days.forEach((d, i) => { html += `<span class="col ${iso(d) === iso(TODAY) ? 'today' : ''}" style="grid-column:${i + 2}"></span>`; });
+  html += '</div></div>';
+  $('#plan').innerHTML = html;
+
+  // 予定をバーとして置く (位置はピクセルで計算)
+  const body = $('#ganttBody');
+  const W = body.clientWidth, colW = (W - 46) / 7;
+  const s0 = start.getTime(), s1 = addDays(start, 7).getTime();
+  let bubbleDone = false;
+  events.forEach((e) => {
+    const from = new Date(e.date + 'T00:00').getTime();
+    const to = from + (e.days || 1) * DAY;
+    // この週に入らない予定は飛ばす
+    if (to <= s0 || from >= s1) return;
+    // 何日目から何日目まで / 時刻から縦の位置を出す
+    const a = Math.max(0, (from - s0) / DAY), b = Math.min(7, (to - s0) / DAY);
+    const [hh, mm] = e.time.split(':').map(Number);
+    const top = Math.min(ROWS - 0.4, ((hh + mm / 60) - H0) / ((H1 - H0) / ROWS)) * rowH + 10;
+    const bar = document.createElement('button');
+    bar.type = 'button';
+    bar.className = `bar-ev k-${e.kind}`;
+    bar.style.left = `${46 + a * colW + 4}px`;
+    bar.style.width = `${Math.max(14, (b - a) * colW - 8)}px`;
+    bar.style.top = `${Math.max(4, top)}px`;
+    bar.title = `${e.title} (${e.kind}) ${md(new Date(from))} ${e.time}${e.days > 1 ? ` から${e.days}日間` : ''}`;
+    bar.setAttribute('aria-label', bar.title);
+    bar.addEventListener('click', () => toast(bar.title));
+    body.append(bar);
+    // 期限のある課題には、付箋の吹き出しを1つだけ出す
+    if (e.note && !bubbleDone) {
+      bubbleDone = true;
+      const bub = document.createElement('div');
+      bub.className = 'bubble';
+      bub.innerHTML = `<b>${esc(e.title)}</b>${esc(e.note)}`;
+      bub.style.left = `${46 + ((a + b) / 2) * colW}px`;
+      bub.style.top = `${Math.max(4, top) + 10}px`;
+      body.append(bub);
+    }
+  });
+}
+// 月のカレンダーを描く (はみ出す6週目は省く)
+function renderMonth() {
+  const m = new Date(TODAY.getFullYear(), TODAY.getMonth() + view.monthOffset, 1);
+  const start = startOfWeek(m);
+  const evDays = new Set();
+  // 予定がある日を集める (自習は除く)
+  events.forEach((e) => { for (let k = 0; k < (e.days || 1); k++) if (e.kind !== '自習') evDays.add(iso(addDays(new Date(e.date + 'T00:00'), k))); });
+  let html = `<p class="hint" style="margin:8px 0 4px">${m.getFullYear()}年${m.getMonth() + 1}月</p><div class="month">` + ['月', '火', '水', '木', '金', '土', '日'].map((w) => `<span class="dow">${w}</span>`).join('');
+  for (let i = 0; i < 42; i++) {
+    const d = addDays(start, i);
+    if (i >= 35 && d.getMonth() !== m.getMonth()) break;
+    html += `<button type="button" data-day="${iso(d)}" class="${d.getMonth() !== m.getMonth() ? 'other' : ''} ${iso(d) === iso(TODAY) ? 'today' : ''} ${evDays.has(iso(d)) ? 'ev' : ''}" aria-label="${md(d)} に予定を追加">${d.getDate()}</button>`;
+  }
+  $('#plan').innerHTML = html + '</div>';
+}
+// タブ・前後ボタン・日付クリックの操作
+document.querySelectorAll('[data-plan]').forEach((b) => b.addEventListener('click', () => {
+  view.plan = b.dataset.plan === 'month' ? 'month' : +b.dataset.plan;
+  view.monthOffset = 0;
+  renderPlan();
+}));
+$('#planPrev').addEventListener('click', () => { if (view.plan === 'month') view.monthOffset--; else view.plan--; renderPlan(); });
+$('#planNext').addEventListener('click', () => { if (view.plan === 'month') view.monthOffset++; else view.plan++; renderPlan(); });
+$('#plan').addEventListener('click', (e) => { const b = e.target.closest('[data-day]'); if (b) openDialog('eventDialog', { date: b.dataset.day }); });
+
+// ---------- 右: 学習の記録 ----------
+// グラフを描き直す (学習時間は棒、正答率は折れ線)
+function renderChart() {
+  const plot = $('#plot'), tip = $('#tip');
+  plot.querySelector('svg')?.remove();
+  const n = view.range;
+  const days = Array.from({ length: n }, (_, i) => addDays(TODAY, i - n + 1));
+  const isTime = view.metric === 'time';
+  const values = (isTime ? MINUTES : ACCURACY).slice(-n);
+  const goal = isTime ? Math.round(goals.weekHours * 60 / 7) : goals.acc;
+  $('#chartNote').textContent = isTime ? `1日の学習時間 (分) ・ 点線は目標 ${goal}分` : `テストの正答率 ・ 点線は目標 ${goal}%`;
+
+  // 大きさと余白、値から座標への変換
+  const W = Math.max(240, plot.clientWidth || 500);
+  const H = 160;
+  const L = 30, R = 6, T = 12, B = 24;
+  const max = isTime ? Math.max(120, Math.ceil(Math.max(...values, goal) / 30) * 30) : 100;
+  const min = isTime ? 0 : 40;
+  const x = (i) => L + (W - L - R) * (i + 0.5) / n;
+  const y = (v) => T + (H - T - B) * (1 - (v - min) / (max - min));
+  const slot = (W - L - R) / n;
+  let s = '';
+  // 目盛りの線とラベル
+  const ticks = isTime ? [0, max / 2, max] : [40, 70, 100];
+  for (const t of ticks) {
+    s += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/>`;
+    s += `<text class="axis num" x="${L - 8}" y="${y(t) + 3}" text-anchor="end">${isTime ? t : t + '%'}</text>`;
+  }
+  // 日付のラベル (日数が多いときは間引く)
+  const every = n > 14 ? 5 : n > 7 ? 2 : 1;
+  days.forEach((d, i) => {
+    if ((n - 1 - i) % every !== 0) return;
+    const label = i === n - 1 ? '今日' : n <= 7 ? WD[d.getDay()] : md(d);
+    s += `<text class="axis num" x="${x(i)}" y="${H - 6}" text-anchor="middle" ${i === n - 1 ? 'style="fill:var(--primary);font-weight:600"' : ''}>${label}</text>`;
+  });
+  // 学習時間は棒グラフ、正答率は折れ線 (テストなしの日は線を切る)
+  if (isTime) {
+    const bw = Math.min(18, slot * 0.5);
+    values.forEach((v, i) => { if (v) s += `<rect class="bar ${i === n - 1 ? 'today' : ''}" x="${x(i) - bw / 2}" y="${y(v)}" width="${bw}" height="${y(0) - y(v)}" rx="${Math.min(6, bw / 2)}"/>`; });
+  } else {
+    let path = '', pen = false;
+    values.forEach((v, i) => { if (v == null) { pen = false; return; } path += `${pen ? 'L' : 'M'}${x(i)},${y(v)}`; pen = true; });
+    s += `<path class="line" d="${path}"/>`;
+    values.forEach((v, i) => { if (v != null && (n <= 14 || i === n - 1)) s += `<circle class="dot ${i === n - 1 ? 'today' : ''}" cx="${x(i)}" cy="${y(v)}" r="3.4"/>`; });
+  }
+  // 目標の点線と、マウス判定用の透明な枠
+  s += `<line class="goal-line" x1="${L}" x2="${W - R}" y1="${y(goal)}" y2="${y(goal)}"/>`;
+  days.forEach((d, i) => { s += `<rect class="hit" data-i="${i}" x="${x(i) - slot / 2}" y="${T}" width="${slot}" height="${H - T - B}"/>`; });
+  plot.insertAdjacentHTML('afterbegin', `<svg viewBox="0 0 ${W} ${H}" height="${H}" role="img" aria-label="${isTime ? '1日ごとの学習時間' : '1日ごとのテスト正答率'}">${s}</svg>`);
+  // マウスを乗せた日の数値を出す
+  const svg = plot.querySelector('svg');
+  svg.addEventListener('pointermove', (e) => {
+    const r = e.target.closest('.hit'); if (!r) return;
+    const i = +r.dataset.i, v = values[i], d = days[i];
+    tip.hidden = false;
+    tip.style.left = `${x(i)}px`;
+    tip.style.top = `${y(v ?? min)}px`;
+    tip.textContent = `${md(d)} ${WD[d.getDay()]}  ${v == null ? 'テストなし' : isTime ? (v ? `${v}分` : '学習なし') : `${v}%`}`;
+  });
+  svg.addEventListener('pointerleave', () => { tip.hidden = true; });
+
+  // グラフ下の数字 (今週 / 連続学習日数 / 直近7日の正答率)
+  const m = weekMin();
+  $('#kWeek').innerHTML = `${Math.floor(m / 60)}<small>時間</small>${m % 60}<small>分</small>`;
+  let streak = 0;
+  for (let i = MINUTES.length - 1; i >= 0 && MINUTES[i] > 0; i--) streak++;
+  $('#kStreak').innerHTML = `${streak}<small>日</small>`;
+  $('#kAcc').innerHTML = `${avg(ACCURACY.slice(-7).filter((v) => v != null))}<small>%</small>`;
+}
+// 指標・期間の切り替えボタン
+document.querySelectorAll('[data-metric]').forEach((b) => b.addEventListener('click', () => {
+  view.metric = b.dataset.metric;
+  document.querySelectorAll('[data-metric]').forEach((x) => x.setAttribute('aria-pressed', x === b));
+  renderChart();
+}));
+document.querySelectorAll('[data-range]').forEach((b) => b.addEventListener('click', () => {
+  view.range = +b.dataset.range;
+  document.querySelectorAll('[data-range]').forEach((x) => x.setAttribute('aria-pressed', x === b));
+  renderChart();
+}));
+// 画面サイズが変わったら少し待ってから描き直す
+let resizeTimer;
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { renderChart(); renderPlan(); }, 100); });
+
+// 目標の進み具合 (今日の復習と正答率の現在値はサンプル)
+function renderGoals() {
+  const rows = [
+    { label: '1週間の学習時間', now: `${(weekMin() / 60).toFixed(1)} / ${goals.weekHours}時間`, pct: weekMin() / (goals.weekHours * 60) },
+    { label: '今日の復習', now: `12 / ${goals.dailyWords}語`, pct: 12 / goals.dailyWords },
+    { label: 'テスト正答率', now: `80 / ${goals.acc}%`, pct: 80 / goals.acc },
+  ];
+  $('#goalList').innerHTML = rows.map((r) => `
+    <div class="slider">
+      <div class="slider-head"><span>${r.label}</span><b>${r.now}</b></div>
+      <div class="meter" role="meter" aria-label="${r.label}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(Math.min(1, r.pct) * 100)}"><i style="width:${Math.min(100, r.pct * 100)}%"></i></div>
+    </div>`).join('');
+}
+
+// ---------- 右上: ユーザー ----------
+function renderAccount() {
+  const name = (data.name || '').trim();
+  $('#avatar').textContent = name[0] || '';
+  $('#avatar').classList.toggle('empty', !name);
+  $('#accountName').textContent = name || 'ゲスト';
+  $('#accountRole').textContent = name ? '学生' : '未登録';
+  $('#registerBtn').hidden = !!name;
+}
+
+// ---------- ダイアログ / トースト ----------
+// OK で閉じたときに実行する処理
+let pending = null;
+// 画面下に短いお知らせを出す
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.hidden = false;
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => { t.hidden = true; }, 2400);
+}
+// スライダーの値を横のラベルに表示
+const sliderLabels = () => {
+  $('#gWeekLabel').textContent = `${$('#gWeekHours').value}時間`;
+  $('#gWordsLabel').textContent = `${$('#gDailyWords').value}語`;
+  $('#gAccLabel').textContent = `${$('#gAcc').value}%`;
+  $('#countLabel').textContent = `${$('#countRange').value}問`;
+  $('#eDaysLabel').textContent = `${$('#eDays').value}日`;
+};
+// スライダー・閉じるボタン・ダイアログを閉じたときの処理
+document.querySelectorAll('dialog input[type="range"]').forEach((r) => r.addEventListener('input', sliderLabels));
+document.querySelectorAll('dialog [data-close]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close('cancel')));
+document.querySelectorAll('dialog').forEach((d) => d.addEventListener('close', () => {
+  const fn = pending; pending = null;
+  if (d.returnValue === 'ok' && fn) fn();
+}));
+
+// ダイアログごとの「OK」の処理
+const onOk = {
+  testDialog: () => toast('(モック) テスト画面へ移動します'),
+  goalDialog: () => {
+    goals.examName = $('#gExamName').value.trim() || goals.examName;
+    goals.examDate = $('#gExamDate').value || goals.examDate;
+    goals.weekHours = +$('#gWeekHours').value;
+    goals.dailyWords = +$('#gDailyWords').value;
+    goals.acc = +$('#gAcc').value;
+    renderAll(); toast('目標を保存しました');
+  },
+  eventDialog: () => {
+    const title = $('#eTitle').value.trim();
+    if (!title) return;
+    events.push({ date: $('#eDate').value || iso(TODAY), time: $('#eTime').value || '00:00', days: +$('#eDays').value, title, kind: document.querySelector('input[name="kind"]:checked').value });
+    renderPlan(); renderTop(); toast('予定を追加しました');
+  },
+  accountDialog: () => {
+    const name = $('#accountInput').value.trim();
+    if (!name) return;
+    saveName(name);
+    renderAccount();
+  },
+};
+// ダイアログを開く (入力欄を今の値で埋める)
+function openDialog(id, opts = {}) {
+  const dlg = document.getElementById(id);
+  if (id === 'goalDialog') {
+    $('#gExamName').value = goals.examName; $('#gExamDate').value = goals.examDate;
+    $('#gWeekHours').value = goals.weekHours; $('#gDailyWords').value = goals.dailyWords; $('#gAcc').value = goals.acc;
+  }
+  if (id === 'eventDialog') { $('#eTitle').value = ''; $('#eDate').value = opts.date || iso(TODAY); $('#eDays').value = 1; }
+  if (id === 'accountDialog') $('#accountInput').value = '';
+  sliderLabels();
+  pending = onOk[id];
+  dlg.returnValue = '';
+  dlg.showModal();
+}
+// data-open の付いたボタンでダイアログを開く
+document.addEventListener('click', (e) => {
+  const o = e.target.closest('[data-open]');
+  if (o) { e.preventDefault(); openDialog(o.dataset.open); }
+});
+$('#registerBtn').addEventListener('click', () => openDialog('accountDialog'));
+
+// 全部描き直す / 最初の表示
+function renderAll() { renderTop(); renderSubjects(); renderLearning(); renderPlan(); renderChart(); renderGoals(); renderAccount(); }
+renderAll();
+</script>
+</body>
+</html>

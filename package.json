@@ -1,0 +1,16 @@
+{
+  "name": "noteapp",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file=.env.local dev-server.mjs",
+    "dev:lan": "node --env-file=.env.local dev-server.mjs --lan",
+    "check": "node --env-file=.env.local check-key.mjs",
+    "build:demo": "node scripts/build-demo.mjs",
+    "preview:demo": "node dev-server.mjs --demo",
+    "share:demo": "node scripts/build-demo.mjs && node dev-server.mjs --demo --lan"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

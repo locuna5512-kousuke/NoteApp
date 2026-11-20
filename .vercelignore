@@ -1,0 +1,11 @@
+# 公開版 (デモ) に送らないもの。公開版は静的サイトなので、AI を呼ぶサーバー (api/) も送らない
+.env
+.env.*
+!.env.example
+api/
+dist/
+_backup_*/
+.claude/
+node_modules/
+check-key.mjs
+dev-server.mjs
