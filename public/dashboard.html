@@ -491,6 +491,8 @@ function loadData() {
 // ログイン中なら Supabase のノートを localStorage に写す ('guest' / 'synced' / 'offline')
 const cloudStatus = await cloud.start(STORAGE_KEY);
 const data = loadData() || structuredClone(FALLBACK);
+// ログイン前に書いたノートを Supabase のノートと合わせたときは、合わせた結果を送る
+if (cloud.merged) cloud.push(data);
 // 更新日が新しい順のノート / ノートの科目
 const byUpdated = () => [...data.notes].sort((a, b) => b.updated.localeCompare(a.updated));
 const subjectOf = (n) => data.subjects.find((s) => s.id === n.subjectId);

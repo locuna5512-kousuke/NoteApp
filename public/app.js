@@ -143,8 +143,9 @@ function save() {
 
 // 保存データがなければサンプルで始める (structuredClone でサンプル自体は書きかえない)
 const state = load() || { subjects: structuredClone(SAMPLE_SUBJECTS), notes: structuredClone(SAMPLE_NOTES), name: '' };
-// 初めてログインしたときは、この端末のノート (無ければサンプル) を Supabase に入れておく
-if (cloud.firstTime) save();
+// 初めてログインしたときは、この端末のノート (無ければサンプル) を Supabase に入れておく。
+// ログイン前に書いたノートを Supabase のノートと合わせたときも、合わせた結果を送る
+if (cloud.firstTime || cloud.merged) save();
 state.noteId = null;
 state.query = '';
 // 「新しいノート」を作る場所 (いま見ている科目・単元)
@@ -1106,6 +1107,7 @@ function renderAccount() {
 renderAccount();
 
 // Supabase とのやり取りがうまくいかなかったときのお知らせ
+if (cloud.merged) toast('ログイン前にこの端末で書いたノートを、クラウドのノートに追加しました');
 if (cloudStatus === 'offline') toast('クラウドのノートを読み込めませんでした。この端末の内容を表示しています（クラウドには保存されません）');
 addEventListener('cloud-save-error', () => toast('クラウドに保存できませんでした。この端末には保存されています'));
 

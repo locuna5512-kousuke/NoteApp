@@ -35,6 +35,8 @@ export let user = null;
 let canPush = false;
 // Supabase にまだ行が無かった (= 初めてログインした) か
 export let firstTime = false;
+// ログイン前にこの端末で書いたノートを、Supabase のノートと合わせたか
+export let merged = false;
 
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* 保存できなくても動かす */ } };
@@ -62,7 +64,12 @@ export async function start(storageKey) {
 
   const owner = lsGet(OWNER_KEY);
   if (row) {
-    lsSet(storageKey, JSON.stringify(row.data));
+    // この端末に「ログインせずに書いたノート」(持ち主の記録なし) があれば、消さずに合わせる。
+    // 本人のノートの写し (持ち主 = 本人) なら Supabase を正とする (ほかの端末で消したノートを戻さないため)
+    const local = owner ? null : parse(lsGet(storageKey));
+    const data = local ? mergeNotebooks(row.data, local) : row.data;
+    merged = !!local && JSON.stringify(data) !== JSON.stringify(row.data);
+    lsSet(storageKey, JSON.stringify(data));
   } else {
     firstTime = true;
     // 初めてのログイン。この端末のノートがほかの人のものなら引き継がない (サンプルから始める)
@@ -71,6 +78,36 @@ export async function start(storageKey) {
   lsSet(OWNER_KEY, user.id);
   canPush = true;
   return 'synced';
+}
+
+// localStorage の文字列を読む。形が違えば null
+function parse(text) {
+  try {
+    const v = JSON.parse(text);
+    return v && Array.isArray(v.subjects) && Array.isArray(v.notes) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+// Supabase のノート (remote) に、この端末のノート (local) を足し合わせる。何も消さない。
+// - 科目・単元: ID が同じなら Supabase のものを使い、この端末にしか無いものを足す
+// - ノート: ID が同じなら更新日が新しいほう (同じ日なら Supabase)。この端末にしか無いものは足す
+function mergeNotebooks(remote, local) {
+  const subjects = structuredClone(remote.subjects);
+  for (const ls of local.subjects) {
+    const rs = subjects.find((s) => s.id === ls.id);
+    if (!rs) { subjects.push(structuredClone(ls)); continue; }
+    rs.units ??= [];
+    for (const u of ls.units || []) if (!rs.units.some((x) => x.id === u.id)) rs.units.push(structuredClone(u));
+  }
+  const notes = structuredClone(remote.notes);
+  for (const ln of local.notes) {
+    const i = notes.findIndex((n) => n.id === ln.id);
+    if (i < 0) notes.push(structuredClone(ln));
+    else if ((ln.updated || '') > (notes[i].updated || '')) notes[i] = structuredClone(ln);
+  }
+  return { ...remote, subjects, notes, name: remote.name || local.name || '' };
 }
 
 // 保存の内容を Supabase に送る (続けて呼ばれたら最後の1回だけ送る)
