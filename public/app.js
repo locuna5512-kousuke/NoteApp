@@ -3,7 +3,7 @@
 // 1枚のページの中で、URL の # の部分で画面を切り替える:
 //   #/home                 ホーム
 //   #/note/<id>            ノート編集 (Markdown + プレビュー、自動保存)
-//   #/note/<id>/ai         AI 補助 (要約 / 確認問題5問)
+//   #/note/<id>/ai         AIに聞く (要約 / 確認問題 5〜15問)
 //   #/unit/<科目>/<単元>   単元を開く (最初のノートへ)
 //   #/review               今日の復習 (1・3・7・14・30日の間隔)
 //   #/search?q=…           検索
@@ -456,7 +456,7 @@ function editorHtml(note) {
       <nav class="crumbs" aria-label="ノートの場所">${pathOf(note).map(esc).join('<span class="sep">›</span>')}</nav>
       <span class="chip chip-saved" id="saveChip" role="status"></span>
       <label class="switch"><input type="checkbox" id="reviewToggle" ${note.review ? 'checked' : ''}><span class="knob"></span>復習リスト</label>
-      <a class="btn btn-primary" href="#/note/${note.id}/ai">${icon('sparkle')}AI 補助</a>
+      <a class="btn btn-primary" href="#/note/${note.id}/ai">${icon('sparkle')}AIに聞く</a>
       <button class="icon-btn" type="button" id="noteMore" aria-label="ノートのメニュー" aria-haspopup="menu">${icon('more')}</button>
     </div>
     <input class="title-input" id="titleInput" type="text" maxlength="100" placeholder="タイトル" aria-label="ノートのタイトル" value="${esc(note.title)}">
@@ -546,7 +546,7 @@ let focusTitleOnce = false;
 addEventListener('pagehide', () => cleanup?.());
 
 // =========================================================
-// AI 補助 (要約 / 確認問題5問)
+// AIに聞く (要約 / 確認問題 5〜15問)
 // =========================================================
 const summaryCache = new Map(); // ノートの id → { body, text }
 const quizCache = new Map();    // ノートの id → { body, promise }
@@ -555,7 +555,7 @@ let aiRun = 0; // 画面を書きかえるたびに増やす (古い待ちが後
 
 const aiErrorText = (e) => ai.ERROR_MESSAGES[e?.kind] || ai.ERROR_MESSAGES.unknown;
 const AI_CONFIRM = {
-  quiz: { title: 'AIで確認問題を作りますか？', text: 'ノートの内容から、確認問題を5問作ります。', ok: '作成する' },
+  quiz: { title: 'AIで確認問題を作りますか？', text: 'ノートの内容から、確認問題を15問作ります。5・10・15問から選んで解けます。', ok: '作成する' },
   summary: { title: 'AIで要約しますか？', text: 'ノートの内容を3〜5行にまとめます。', ok: '要約する' },
   photo: { title: 'この写真から用語を読み取りますか？', text: '写真から用語と説明を読み取ります。1〜2分かかることがあります。', ok: '読み取る' },
 };
@@ -580,11 +580,11 @@ function renderAi(r) {
       <h1 class="page-title">${esc(note.title || '無題のノート')}</h1>
       <article class="card read-card md">${renderMarkdown(note.body)}</article>
     </section>
-    <aside class="ai-side" aria-label="AI 補助">
-      <div class="ai-side-head"><h2>${icon('sparkle')}AI 補助</h2>${ai.isDemo ? '<span class="chip chip-demo">デモ出力です</span>' : ''}</div>
+    <aside class="ai-side" aria-label="AIに聞く">
+      <div class="ai-side-head"><h2>${icon('sparkle')}AIに聞く</h2>${ai.isDemo ? '<span class="chip chip-demo">デモ出力です</span>' : ''}</div>
       <div class="seg" role="tablist">
         <button type="button" role="tab" data-tab="summary" aria-selected="${aiTab === 'summary'}">要約</button>
-        <button type="button" role="tab" data-tab="quiz" aria-selected="${aiTab === 'quiz'}">確認問題5問</button>
+        <button type="button" role="tab" data-tab="quiz" aria-selected="${aiTab === 'quiz'}">確認問題</button>
       </div>
       <div class="ai-body" id="aiBody" aria-live="polite"></div>
       <p class="ai-foot">ノートを書き換えるまでは、同じ結果を再利用します</p>
@@ -643,10 +643,14 @@ function validQuiz(questions) {
   const ok = questions.filter((q) => q && q.text && q.answer).map((q) => ({ text: String(q.text), answer: String(q.answer) }));
   return ok.length ? ok : null;
 }
+// 15問の束を1回だけ作って保持し、5・10・15問はそこから選ぶ (ノートを書き換えたら作り直す)
+const QUIZ_POOL = 15;
+const QUIZ_COUNTS = [5, 10, 15];
+let quizCount = 5;
+const hasQuiz = (note) => { const c = quizCache.get(note.id); return !!(c && c.body === note.body); };
 function quizFor(note) {
-  const c = quizCache.get(note.id);
-  if (c && c.body === note.body) return c.promise;
-  const promise = ai.generate({ feature: 'quiz', input: note.body, options: { count: 5 } }).then((r) => {
+  if (hasQuiz(note)) return quizCache.get(note.id).promise;
+  const promise = ai.generate({ feature: 'quiz', input: note.body, options: { count: QUIZ_POOL } }).then((r) => {
     const qs = validQuiz(r.data.questions);
     if (!qs) throw new ai.AiError('unknown');
     return qs;
@@ -655,18 +659,29 @@ function quizFor(note) {
   promise.catch(() => quizCache.delete(note.id));
   return promise;
 }
-async function showQuiz(note, body, run) {
-  const c = quizCache.get(note.id);
-  if (!(c && c.body === note.body)) {
-    body.innerHTML = `<div class="ai-intro"><p>ノートの内容から確認問題を5問作ります。答えを自分の言葉で書いてから、答え合わせをしましょう。</p>
-      <button class="btn btn-primary btn-block" type="button" id="doQuiz">${icon('sparkle')}確認問題を作る</button></div>`;
-    $('#doQuiz').addEventListener('click', async () => {
-      if (!(await confirmAi('quiz')) || run !== aiRun) return;
-      startQuiz(note, body, run);
-    });
-    return;
-  }
-  startQuiz(note, body, run);
+// 問題数のボタン (5問 / 10問 / 15問) と「問題を作る」ボタン
+function showQuiz(note, body, run) {
+  const ready = hasQuiz(note);
+  body.innerHTML = `<div class="ai-intro">
+      <p>ノートの内容から確認問題を作ります。答えを自分の言葉で書いてから、答え合わせをしましょう。</p>
+      <div class="count-pick" role="radiogroup" aria-label="問題数">
+        ${QUIZ_COUNTS.map((n) => `<button type="button" role="radio" data-count="${n}" aria-checked="${n === quizCount}">${n}問</button>`).join('')}
+      </div>
+      <button class="btn btn-primary btn-lg btn-block" type="button" id="doQuiz">${icon('sparkle')}<span id="doQuizLabel"></span></button>
+    </div>`;
+  const label = () => { $('#doQuizLabel').textContent = `${quizCount}問の問題を${ready ? '解く' : '作る'}`; };
+  label();
+  $('.count-pick', body).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-count]');
+    if (!b) return;
+    quizCount = Number(b.dataset.count);
+    body.querySelectorAll('[data-count]').forEach((x) => x.setAttribute('aria-checked', x === b));
+    label();
+  });
+  $('#doQuiz').addEventListener('click', async () => {
+    if (!ready && (!(await confirmAi('quiz')) || run !== aiRun)) return;
+    startQuiz(note, body, run);
+  });
 }
 async function startQuiz(note, body, run) {
   showThinking(body, '考え中… 確認問題を作っています');
@@ -676,15 +691,17 @@ async function startQuiz(note, body, run) {
     return;
   }
   if (run !== aiRun) return;
-  const qs = shuffle(pool).slice(0, 5);
+  const qs = shuffle(pool).slice(0, quizCount);
   let i = 0, score = 0;
   const step = () => {
     if (run !== aiRun) return;
     if (i >= qs.length) {
       body.innerHTML = `<div class="result"><p class="hint">おつかれさま！</p><p class="big num">${score} / ${qs.length}</p>
         <p>${score === qs.length ? '全問正解です。' : '「忘れていた」問題は、ノートを見直しておきましょう。'}</p>
-        <button class="btn btn-primary" type="button" id="again">もう一度解く</button></div>`;
+        <button class="btn btn-primary" type="button" id="again">もう一度解く</button>
+        <button class="link-btn" type="button" id="changeCount">問題数を変える</button></div>`;
       $('#again').addEventListener('click', () => startQuiz(note, body, run));
+      $('#changeCount').addEventListener('click', () => showQuiz(note, body, run));
       return;
     }
     const q = qs[i];

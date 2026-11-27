@@ -405,7 +405,7 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 3px; paddi
 .editor-empty { margin: auto; display: grid; justify-items: center; gap: 14px; padding: 60px 20px; text-align: center; color: var(--muted); }
 
 /* =========================================================
-   AI 補助 (ノートのプレビュー + 右の AI パネル)
+   AIに聞く (ノートのプレビュー + 右の AI パネル)
    ========================================================= */
 .ai-layout { display: grid; grid-template-columns: minmax(0, 1fr) 400px; min-height: 100%; }
 .ai-main { padding: 26px 30px 40px; display: flex; flex-direction: column; gap: 14px; }
@@ -419,6 +419,10 @@ mark { background: var(--accent-soft); color: inherit; border-radius: 3px; paddi
 .seg button[aria-selected="true"] { background: var(--card); color: var(--ink); box-shadow: var(--shadow-sm); }
 .ai-body { display: flex; flex-direction: column; gap: 14px; flex: 1; }
 .ai-intro { display: grid; gap: 14px; padding: 20px; border-radius: var(--r-md); background: var(--bg); color: var(--ink-2); font-size: 13px; }
+.count-pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.count-pick button { min-height: 44px; border: 1.5px solid var(--line-2); border-radius: 999px; background: var(--card); font-size: 14px; font-weight: 700; color: var(--ink-2); }
+.count-pick button:hover { border-color: var(--accent); }
+.count-pick button[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-deep); }
 .ai-foot { margin-top: auto; font-size: 11px; color: var(--muted); }
 .q-progress { display: flex; align-items: center; gap: 12px; }
 .q-progress b { font-family: var(--serif); font-size: 15px; white-space: nowrap; }
