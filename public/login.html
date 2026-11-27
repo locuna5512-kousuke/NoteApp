@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ログイン | AIといっしょ</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* ログイン画面だけの配置 */
+    .login-page { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; background: var(--bg); }
+    .login-card {
+      width: 100%; max-width: 380px;
+      display: grid; gap: 18px;
+      padding: 32px 28px;
+      border-radius: 24px; background: var(--board); box-shadow: var(--shadow);
+    }
+    .login-card h1 { margin: 0; font-size: 22px; }
+    .login-card .lead { margin: -8px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.7; }
+    .login-actions { display: flex; gap: 10px; }
+    .login-actions .btn { flex: 1; min-height: 42px; }
+    .login-msg { margin: 0; font-size: 12.5px; line-height: 1.6; }
+    .login-msg.error { color: var(--coral); }
+    .login-msg.ok { color: var(--green); }
+    .login-foot { display: flex; justify-content: space-between; font-size: 12px; }
+    .login-foot a { color: var(--muted); }
+    .login-foot a:hover { color: var(--primary); }
+  </style>
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <h1>ログイン</h1>
+    <p class="lead">ログインすると、ノートがクラウドに保存され、PC とスマホのどちらからでも開けます。</p>
+
+    <form id="loginForm" class="login-card-form" style="display:grid;gap:14px" novalidate>
+      <label class="field"><span>メールアドレス</span>
+        <input id="email" type="email" required autocomplete="email" inputmode="email">
+      </label>
+      <label class="field"><span>パスワード（6文字以上）</span>
+        <input id="password" type="password" required minlength="6" autocomplete="current-password">
+      </label>
+
+      <p class="login-msg" id="msg" role="status" hidden></p>
+
+      <div class="login-actions">
+        <button class="btn btn-primary" type="submit" value="signin">ログイン</button>
+        <button class="btn" type="submit" value="signup">新規登録</button>
+      </div>
+    </form>
+
+    <div class="login-foot">
+      <a href="index.html">ログインせずに使う</a>
+      <a href="dashboard.html">ホームへ</a>
+    </div>
+  </main>
+
+  <script type="module">
+    import * as cloud from './cloud.js';
+
+    const $ = (s) => document.querySelector(s);
+    const NEXT = 'index.html'; // ログインできたら開く画面
+
+    // メッセージを出す (kind: 'error' / 'ok')
+    function say(text, kind) {
+      const m = $('#msg');
+      m.textContent = text;
+      m.className = `login-msg ${kind}`;
+      m.hidden = !text;
+    }
+
+    // Supabase のよくあるエラーを日本語にする
+    function message(error) {
+      const t = error?.message || '';
+      if (/Invalid login credentials/i.test(t)) return 'メールアドレスかパスワードが違います。';
+      if (/Email not confirmed/i.test(t)) return 'メールの確認がまだです。届いたメールのリンクを開いてください。';
+      if (/already registered|already been registered/i.test(t)) return 'このメールアドレスは登録済みです。「ログイン」を押してください。';
+      if (/Password should be/i.test(t)) return 'パスワードは6文字以上にしてください。';
+      if (/rate limit/i.test(t)) return '短い時間に何度も試したため、少し待ってからやり直してください。';
+      return `うまくいきませんでした（${t || '通信エラー'}）。`;
+    }
+
+    if (!cloud.supabase) {
+      // Supabase の設定が無い・読み込めないときは、ログインせずに使ってもらう
+      say('いまはログインを使えません。「ログインせずに使う」からノートを開けます（この端末の中だけに保存されます）。', 'error');
+      $('#loginForm').querySelectorAll('input, button').forEach((el) => { el.disabled = true; });
+    } else if (await cloud.currentUser()) {
+      // すでにログイン中 (確認メールのリンクから戻ってきたときも含む)
+      location.replace(NEXT);
+    }
+
+    $('#loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.currentTarget;
+      if (!form.reportValidity()) return;
+      const mode = e.submitter?.value === 'signup' ? 'signup' : 'signin';
+      const email = $('#email').value.trim();
+      const password = $('#password').value;
+
+      const buttons = form.querySelectorAll('button');
+      buttons.forEach((b) => { b.disabled = true; });
+      say('', '');
+      try {
+        if (mode === 'signin') {
+          const { error } = await cloud.supabase.auth.signInWithPassword({ email, password });
+          if (error) { say(message(error), 'error'); return; }
+          location.replace(NEXT);
+        } else {
+          const { data, error } = await cloud.supabase.auth.signUp({
+            email, password,
+            // 確認メールのリンクを開いたら、この画面に戻ってくる
+            options: { emailRedirectTo: new URL('login.html', location.href).href },
+          });
+          if (error) { say(message(error), 'error'); return; }
+          if (data.session) location.replace(NEXT); // メール確認なしの設定なら、そのままログイン
+          else say('確認メールを送りました。メールのリンクを開くとログインできます。', 'ok');
+        }
+      } finally {
+        buttons.forEach((b) => { b.disabled = false; });
+      }
+    });
+  </script>
+</body>
+</html>

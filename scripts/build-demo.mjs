@@ -37,6 +37,15 @@ const typingSpeed = Number(process.env.TYPING_SPEED) || 30;
 await writeFile(join(OUT, 'ai', 'config.js'),
   `// 公開版 (npm run build:demo で作成)。AI は常にデモ\nexport default ${JSON.stringify({ mode: 'mock', typingSpeed })};\n`);
 
+// 3.5) Supabase の接続先 (ログインとノートの保存)。公開先の環境変数から書き出す。
+// 設定が無ければ空のまま = ログインなしで動く。URL と publishable キーはブラウザに渡してよい値
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '';
+if (supabaseKey.startsWith('sb_secret_')) fail('Supabase の secret キーが設定されています。publishable キーにしてください');
+await writeFile(join(OUT, 'supabase-config.js'),
+  `// 公開版 (npm run build:demo で作成)\nexport default ${JSON.stringify({ url: supabaseUrl, key: supabaseKey })};\n`);
+if (!supabaseUrl || !supabaseKey) console.warn('注意: Supabase の設定が無いので、公開版はログインなし (端末の中だけに保存) で動きます');
+
 // 4) 残っていてはいけないものを探す
 const banned = [/gemini/i, /API_KEY/, /generativelanguage/i, /realClient/, /api\/ai/];
 // 手元に .env.local があれば、キーの値そのものも探す (値は表示しない)

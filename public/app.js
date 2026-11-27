@@ -13,9 +13,14 @@
 import * as ai from './ai/index.js';
 import { showThinking, streamInto, addDemoBadge } from './components/AiOutput.js';
 import { demoBadge } from './components/DemoBadge.js';
+import * as cloud from './cloud.js';
 
 const STORAGE_KEY = 'noteapp.v2';
 const OLD_STORAGE_KEY = 'noteapp.v1'; // 科目が「フォルダ名の文字列」だったころのデータ
+
+// ログイン中なら、Supabase に保存してあるノートを localStorage に写してから画面を作る
+// ('guest' = 未ログイン / 'synced' = 読み込めた / 'offline' = 読めなかった)
+const cloudStatus = await cloud.start(STORAGE_KEY);
 
 const SAMPLE_SUBJECTS = [
   { id: 's1', name: '基本情報技術者', open: true, units: [
@@ -127,15 +132,19 @@ function migrateV1(old) {
   return { subjects, notes: old.notes, name: old.name || '' };
 }
 
-// 科目・ノート・名前を localStorage に保存する
+// 科目・ノート・名前を localStorage に保存する。ログイン中は Supabase にも送る
 function save() {
+  const data = { subjects: state.subjects, notes: state.notes, name: state.name };
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ subjects: state.subjects, notes: state.notes, name: state.name }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   } catch { /* 保存できなくても動かす */ }
+  cloud.push(data);
 }
 
 // 保存データがなければサンプルで始める (structuredClone でサンプル自体は書きかえない)
 const state = load() || { subjects: structuredClone(SAMPLE_SUBJECTS), notes: structuredClone(SAMPLE_NOTES), name: '' };
+// 初めてログインしたときは、この端末のノート (無ければサンプル) を Supabase に入れておく
+if (cloud.firstTime) save();
 state.noteId = null;
 state.query = '';
 // 「新しいノート」を作る場所 (いま見ている科目・単元)
@@ -1069,11 +1078,23 @@ function hideBubble(now = false) {
 setTimeout(() => showBubble(10000), 600);
 
 // =========================================================
-// アカウント: 登録済みなら名前を表示するだけ (ここでは編集しない)。
-// 登録は仮で、アカウント名をこの端末に保存するだけ。本物の登録・ログインは未実装
+// アカウント
+// - Supabase の設定があるとき: 未ログインなら「ログイン」、ログイン中なら「ログアウト」ボタン
+// - 設定が無いとき: これまでどおりの仮登録 (アカウント名をこの端末に保存するだけ)
 // =========================================================
-// アカウントの表示 (名前・アイコン・登録ボタン) を更新する
+// アカウントの表示 (名前・アイコン・ボタン) を更新する
 function renderAccount() {
+  if (cloud.enabled) {
+    const name = (state.name || cloud.user?.email || '').trim();
+    $('#avatar').textContent = cloud.user ? name[0] || '' : '';
+    $('#avatar').classList.toggle('empty', !cloud.user);
+    $('#accountName').textContent = name;
+    $('#accountName').hidden = !cloud.user;
+    $('#accountRole').textContent = cloud.user ? 'ログイン中' : 'ゲスト';
+    $('#registerBtn').textContent = cloud.user ? 'ログアウト' : 'ログイン';
+    $('#registerBtn').hidden = false;
+    return;
+  }
   const name = (state.name || '').trim();
   $('#avatar').textContent = name[0] || '';
   $('#avatar').classList.toggle('empty', !name);
@@ -1084,8 +1105,17 @@ function renderAccount() {
 }
 renderAccount();
 
-// 「登録」ボタン: 名前を入れてこの端末に保存する
-$('#registerBtn').addEventListener('click', () => {
+// Supabase とのやり取りがうまくいかなかったときのお知らせ
+if (cloudStatus === 'offline') toast('クラウドのノートを読み込めませんでした。この端末の内容を表示しています（クラウドには保存されません）');
+addEventListener('cloud-save-error', () => toast('クラウドに保存できませんでした。この端末には保存されています'));
+
+// ボタン: ログイン画面へ / ログアウト / (設定が無いときは) 名前を入れてこの端末に保存する
+$('#registerBtn').addEventListener('click', async () => {
+  if (cloud.enabled) {
+    if (cloud.user) await cloud.signOut(STORAGE_KEY); // 送り残しを送ってから出る
+    location.href = 'login.html';
+    return;
+  }
   $('#accountInput').value = '';
   openDialog($('#accountDialog'), () => {
     const name = $('#accountInput').value.trim();

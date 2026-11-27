@@ -444,10 +444,12 @@
 <!-- 画面下に出る短いお知らせ -->
 <div class="toast" id="toast" role="status" hidden></div>
 
-<script>
+<script type="module">
 // ホーム (ダッシュボード) のモック。
 // 科目・ノート・用語・アカウント名はノート画面と同じ保存データ (noteapp.v2) を読む。
+// ログイン中は、先に Supabase の内容を noteapp.v2 に写してから読む (cloud.js)。
 // 学習時間・正答率・ノートごとの正答率・予定はサンプルの数字。
+import * as cloud from './cloud.js';
 // よく使う小さな関数 (要素の取得・日付・エスケープなど)
 const $ = (s) => document.querySelector(s);
 const DAY = 86400000;
@@ -486,6 +488,8 @@ function loadData() {
   } catch { /* 読めなければサンプル */ }
   return null;
 }
+// ログイン中なら Supabase のノートを localStorage に写す ('guest' / 'synced' / 'offline')
+const cloudStatus = await cloud.start(STORAGE_KEY);
 const data = loadData() || structuredClone(FALLBACK);
 // 更新日が新しい順のノート / ノートの科目
 const byUpdated = () => [...data.notes].sort((a, b) => b.updated.localeCompare(a.updated));
@@ -497,6 +501,7 @@ function saveName(name) {
     const cur = loadData() || structuredClone(FALLBACK);
     cur.name = name;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(cur));
+    cloud.push(cur);
   } catch { /* 保存できなくても表示は変える */ }
 }
 
@@ -756,6 +761,18 @@ function renderGoals() {
 
 // ---------- 右上: ユーザー ----------
 function renderAccount() {
+  // Supabase の設定があるとき: 未ログインなら「ログイン」、ログイン中なら「ログアウト」
+  if (cloud.enabled) {
+    const name = (data.name || cloud.user?.email || '').trim();
+    $('#avatar').textContent = cloud.user ? name[0] || '' : '';
+    $('#avatar').classList.toggle('empty', !cloud.user);
+    $('#accountName').textContent = cloud.user ? name : 'ゲスト';
+    $('#accountRole').textContent = cloud.user ? 'ログイン中' : '未ログイン';
+    $('#registerBtn').textContent = cloud.user ? 'ログアウト' : 'ログイン';
+    $('#registerBtn').hidden = false;
+    return;
+  }
+  // 設定が無いとき: これまでどおりの仮登録 (アカウント名をこの端末に保存するだけ)
   const name = (data.name || '').trim();
   $('#avatar').textContent = name[0] || '';
   $('#avatar').classList.toggle('empty', !name);
@@ -831,7 +848,14 @@ document.addEventListener('click', (e) => {
   const o = e.target.closest('[data-open]');
   if (o) { e.preventDefault(); openDialog(o.dataset.open); }
 });
-$('#registerBtn').addEventListener('click', () => openDialog('accountDialog'));
+$('#registerBtn').addEventListener('click', async () => {
+  if (!cloud.enabled) { openDialog('accountDialog'); return; }
+  if (cloud.user) await cloud.signOut(STORAGE_KEY); // 送り残しを送ってから出る
+  location.href = 'login.html';
+});
+// Supabase とのやり取りがうまくいかなかったときのお知らせ
+if (cloudStatus === 'offline') setTimeout(() => toast('クラウドのノートを読み込めませんでした'), 300);
+addEventListener('cloud-save-error', () => toast('クラウドに保存できませんでした'));
 
 // 全部描き直す / 最初の表示
 function renderAll() { renderTop(); renderSubjects(); renderLearning(); renderPlan(); renderChart(); renderGoals(); renderAccount(); }

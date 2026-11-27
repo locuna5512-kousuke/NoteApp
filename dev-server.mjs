@@ -21,7 +21,13 @@ const AI_CONFIG = `export default ${JSON.stringify({
   typingSpeed: Number(process.env.TYPING_SPEED) || 30,
 })};
 `;
-const MAX_BODY = 4_500_000;                 // /api/ai に送れる大きさの上限 (Vercel と同じ 4.5MB)
+// Supabase の接続先 (ログインとノートの保存)。URL と publishable キーはブラウザに渡してよい値
+const SUPABASE_CONFIG = `export default ${JSON.stringify({
+  url: process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+  key: process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '',
+})};
+`;
+const MAX_BODY = 4_500_000;                // /api/ai に送れる大きさの上限 (Vercel と同じ 4.5MB)
 // 拡張子ごとに、ブラウザへ伝えるファイルの種類。ここに無い拡張子は配信しない
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -35,6 +41,11 @@ createServer(async (req, res) => {
   // 開発版では、AI の設定ファイルを .env.local の値から作って返す
   if (!DEMO && url.pathname === '/ai/config.js') {
     res.writeHead(200, { 'Content-Type': TYPES['.js'], 'Cache-Control': 'no-store' }).end(AI_CONFIG);
+    return;
+  }
+  // Supabase の接続先も .env.local の値から作って返す
+  if (!DEMO && url.pathname === '/supabase-config.js') {
+    res.writeHead(200, { 'Content-Type': TYPES['.js'], 'Cache-Control': 'no-store' }).end(SUPABASE_CONFIG);
     return;
   }
   // /api/ai への POST は、api/ai.js の処理 (Gemini 呼び出し) に渡す。公開版の確認では使えない
