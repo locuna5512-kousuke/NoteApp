@@ -1,110 +1,111 @@
-// AIといっしょ — 画面の処理。
-// AI の部分 (テスト作成 / 説明チェック / 要約 / 写真から用語) は ai/index.js だけを通して呼ぶ。
-// 本物の AI かデモ (サンプル出力) かは ai/index.js が設定を見て決めるので、ここでは区別しない。
-// 出力の見せ方 (考え中 → タイピング表示 → デモ表記) は components/AiOutput.js に任せる。
+// AIといっしょ — 画面の処理 (画面設計書「PC版 (ラベンダー)」)
 //
-// ノートは「科目 › 単元 › ノート」の3段で整理する。
-// 単元は必須ではなく、科目の直下にノートを置くこともできる (note.unitId = null)。
+// 1枚のページの中で、URL の # の部分で画面を切り替える:
+//   #/home                 ホーム
+//   #/note/<id>            ノート編集 (Markdown + プレビュー、自動保存)
+//   #/note/<id>/ai         AI 補助 (要約 / 確認問題5問)
+//   #/unit/<科目>/<単元>   単元を開く (最初のノートへ)
+//   #/review               今日の復習 (1・3・7・14・30日の間隔)
+//   #/search?q=…           検索
+//   #/trash                ゴミ箱
 //
-// 本文はリッチテキスト (ツールボックスで見出し・文字の大きさ・色を付けられる)。
-// 見た目は note.html に保存し、同じ内容を Markdown 風の文字にしたものを note.body に持つ。
-// 説明チェック・ホーム画面は note.body の「- **用語**: 説明」の行を読む。
+// AI は ai/index.js だけを通して呼ぶ (本物かデモかはそちらが決める)。
+// 保存は localStorage (noteapp.v2)。ログイン中は cloud.js が Supabase にも送る。
 
 import * as ai from './ai/index.js';
-import { showThinking, streamInto, addDemoBadge } from './components/AiOutput.js';
-import { demoBadge } from './components/DemoBadge.js';
+import { showThinking, streamInto } from './components/AiOutput.js';
 import * as cloud from './cloud.js';
 
 const STORAGE_KEY = 'noteapp.v2';
-const OLD_STORAGE_KEY = 'noteapp.v1'; // 科目が「フォルダ名の文字列」だったころのデータ
+const OLD_STORAGE_KEY = 'noteapp.v1';
+const INTERVALS = [1, 3, 7, 14, 30]; // 復習の間隔 (日)
+const MAX_CHARS = 100_000;           // 1ノートの文字数の上限
+const SEARCH_LIMIT = 50;
 
-// ログイン中なら、Supabase に保存してあるノートを localStorage に写してから画面を作る
-// ('guest' = 未ログイン / 'synced' = 読み込めた / 'offline' = 読めなかった)
-const cloudStatus = await cloud.start(STORAGE_KEY);
+// ログイン中なら、Supabase の内容を localStorage に写してから画面を作る
+await cloud.start(STORAGE_KEY);
 
-const SAMPLE_SUBJECTS = [
-  { id: 's1', name: '基本情報技術者', open: true, units: [
-    { id: 'u1', name: 'ネットワーク', open: true },
-    { id: 'u2', name: 'データベース', open: false },
-  ] },
-  { id: 's2', name: '簿記2級', open: false, units: [
-    { id: 'u3', name: '仕訳', open: true },
-  ] },
-  { id: 's3', name: 'TOEIC', open: false, units: [] },
-];
+// ---------- 日付 ----------
+const pad = (n) => String(n).padStart(2, '0');
+const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const today = () => ymd(new Date());
+const addDays = (dateStr, n) => { const d = new Date(`${dateStr}T00:00:00`); d.setDate(d.getDate() + n); return ymd(d); };
+const WEEK = '日月火水木金土';
+const jpDate = (d = new Date()) => `${d.getMonth() + 1}月${d.getDate()}日（${WEEK[d.getDay()]}）`;
+const hhmm = (d) => `${d.getHours()}:${pad(d.getMinutes())}`;
+// 「今日 10:15」「昨日」「11/22」
+function when(note) {
+  const t = note.updatedAt ? new Date(note.updatedAt) : null;
+  const day = t ? ymd(t) : note.updated;
+  if (!day) return '';
+  if (day === today()) return t ? `今日 ${hhmm(t)}` : '今日';
+  if (day === addDays(today(), -1)) return '昨日';
+  const [, m, d] = day.split('-');
+  return `${Number(m)}/${Number(d)}`;
+}
 
-const SAMPLE_NOTES = [
-  {
-    id: 'n1', subjectId: 's1', unitId: 'u1', title: 'ネットワークの基礎', updated: '2026-11-12',
-    body: `# ネットワークの基礎
+// ---------- サンプル (初めて開いたとき) ----------
+function sampleData() {
+  const t = today();
+  const at = (daysAgo, h, m) => { const d = new Date(); d.setDate(d.getDate() - daysAgo); d.setHours(h, m, 0, 0); return d.toISOString(); };
+  const note = (id, subjectId, unitId, title, body, daysAgo, h, m, review) =>
+    ({ id, subjectId, unitId, title, body, updated: addDays(t, -daysAgo), updatedAt: at(daysAgo, h, m), version: 1, ...(review ? { review } : {}) });
+  return {
+    name: '',
+    subjects: [
+      { id: 's1', name: 'データベース', open: true, units: [
+        { id: 'u1', name: '第1回 ER 図' }, { id: 'u2', name: '第2回 正規化' }, { id: 'u3', name: '第3回 SQL 基礎' }] },
+      { id: 's2', name: 'ネットワーク', open: false, units: [{ id: 'u4', name: '第1回 OSI 参照モデル' }] },
+      { id: 's3', name: 'Web プログラミング', open: false, units: [{ id: 'u5', name: '第1回 HTTP' }] },
+      { id: 's4', name: 'ビジネス英語', open: false, units: [{ id: 'u6', name: 'メール' }] },
+    ],
+    notes: [
+      note('n1', 's1', 'u2', '第2正規形', `## 条件
+- 第1正規形であること
+- 主キーの一部だけで決まる列（部分関数従属）がないこと
 
-## プロトコル
-- **TCP**: 通信相手との接続を確立し、データの到達と順序を保証するプロトコル
-- **UDP**: 接続を確立せずに送信する、速度を優先した軽量なプロトコル
-- **HTTP**: ブラウザとサーバの間でWebページをやり取りするプロトコル
-- **DNS**: ドメイン名をIPアドレスに変換する仕組み
+## 例
+受講(**学籍番号, 科目ID**, 氏名, 成績)
+→ 氏名は学籍番号だけで決まる
+→ 学生(**学籍番号**, 氏名) に分ける
 
-## アドレス
-- **IPアドレス**: ネットワーク上の機器を識別する番号
-- **MACアドレス**: 機器に製造時から割り当てられている固有の番号
-- **サブネットマスク**: IPアドレスのネットワーク部とホスト部を区切る値
-- **DHCP**: 機器にIPアドレスを自動で割り当てる仕組み
+## メモ
+- 主キーが1列なら部分関数従属は起きない
+- 次回：第3正規形（推移的関数従属）`, 0, 10, 15, { stage: 2, due: t, last: null }),
+      note('n2', 's1', 'u2', '第1正規形', `## 条件
+- 1つのセルに1つの値だけが入っていること
+- 繰り返し項目を別の行に分ける。正規化の最初のステップ
 
-> 動画配信や通話は多少欠けても速いほうがいい → UDP`,
-  },
-  {
-    id: 'n5', subjectId: 's1', unitId: 'u1', title: 'OSI参照モデル', updated: '2026-11-15',
-    body: `# OSI参照モデル
+## 用語
+- **原子値**: それ以上分けられない値
+- **繰り返し項目**: 1行の中に同じ種類の値が並ぶこと`, 2, 16, 40, { stage: 1, due: addDays(t, 1), last: addDays(t, -2) }),
+      note('n3', 's1', 'u2', '正規化とは', `表を分けて、同じデータを何度も持たないように整理すること。
 
-- **物理層**: ビット列を電気信号や光に変えて送る層
-- **データリンク層**: 隣り合う機器同士の通信を担う層
-- **ネットワーク層**: 宛先までの経路を選ぶ層
-- **トランスポート層**: 通信の信頼性を確保する層`,
-  },
-  {
-    id: 'n2', subjectId: 's1', unitId: 'u2', title: 'データベース', updated: '2026-11-10',
-    body: `# データベース
-
-## 設計
-- **主キー**: 表の中で行を一意に識別する列
-- **外部キー**: 他の表の主キーを参照して表同士を関連づける列
 - **正規化**: データの重複をなくすために表を分割する設計手法
-- **インデックス**: 検索を速くするために列に作成する索引
+- **更新時異常**: 重複したデータの一部だけが書き換わって食い違うこと`, 7, 9, 30),
+      note('n4', 's1', 'u1', 'ER 図の書き方', `- **エンティティ**: 管理したい「もの」。四角で書く
+- **リレーションシップ**: エンティティ同士の関係
+- **カーディナリティ**: 1対多・多対多などの対応の数`, 9, 13, 0),
+      note('n5', 's2', 'u4', 'OSI 参照モデル', `## 7つの層
+- **物理層**: ビット列を電気信号や光に変えて送る
+- **データリンク層**: 隣り合う機器同士の通信
+- **ネットワーク層**: 宛先までの経路を選ぶ
+- **トランスポート層**: 通信の信頼性を確保する
 
-## 操作
-- **SQL**: データベースを操作するための言語
-- **トランザクション**: 複数の処理をひとまとまりとして扱う単位
-
-\`SELECT name FROM students WHERE grade = 2;\``,
-  },
-  {
-    id: 'n3', subjectId: 's2', unitId: 'u3', title: '仕訳の基本', updated: '2026-11-08',
-    body: `# 仕訳の基本
-
-- **借方**: 仕訳の左側。資産の増加や費用の発生を記入する
-- **貸方**: 仕訳の右側。負債の増加や収益の発生を記入する
-- **資産**: 現金や建物など、会社が持っている財産
-- **負債**: 借入金など、将来支払う義務
-- **純資産**: 資産から負債を差し引いた残り
-- **減価償却**: 固定資産の取得原価を使用期間にわたって費用に配分する手続き`,
-  },
-  {
-    id: 'n4', subjectId: 's3', unitId: null, title: 'Part5 頻出単語', updated: '2026-11-05',
-    body: `# Part5 頻出単語
-
-- **allocate**: 予算や時間を割り当てる
-- **comply**: 規則や要求に従う
-- **reimburse**: 立て替えた費用を払い戻す
-- **postpone**: 予定を延期する
-- **eligible**: 資格がある、対象となる`,
-  },
-];
+> 覚え方：「アプセトネデブ」（上から）`, 1, 20, 10, { stage: 1, due: t, last: null }),
+      note('n6', 's3', 'u5', 'GET と POST', `- **GET**: データを取りに行く。条件は URL に付く
+- **POST**: データを送る。中身はリクエストの本文に入る
+- フォームの送信は基本 POST`, 5, 11, 0, { stage: 0, due: t, last: null }),
+      note('n7', 's4', 'u6', 'メールの定型表現', `- **I hope this email finds you well.**: 書き出しのあいさつ
+- **Please find attached ...**: 添付のご案内
+- **I look forward to hearing from you.**: 結びのあいさつ`, 3, 18, 0, { stage: 2, due: addDays(t, 7), last: t }),
+    ],
+  };
+}
 
 // ---------- 状態 ----------
-// ID を作る (頭の文字 + 時刻 + 乱数)
 const uid = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
-// localStorage から読み込む。新形式がなければ旧形式を変換し、どちらもなければ null
 function load() {
   try {
     const v2 = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -121,10 +122,7 @@ function migrateV1(old) {
   const byName = {};
   for (const n of old.notes) {
     const name = n.folder || 'ノート';
-    if (!byName[name]) {
-      byName[name] = { id: uid('s'), name, open: true, units: [] };
-      subjects.push(byName[name]);
-    }
+    if (!byName[name]) { byName[name] = { id: uid('s'), name, open: true, units: [] }; subjects.push(byName[name]); }
     n.subjectId = byName[name].id;
     n.unitId = null;
     delete n.folder;
@@ -132,101 +130,67 @@ function migrateV1(old) {
   return { subjects, notes: old.notes, name: old.name || '' };
 }
 
-// 科目・ノート・名前を localStorage に保存する。ログイン中は Supabase にも送る
+const state = load() || sampleData();
+for (const s of state.subjects) s.units ??= [];
+for (const n of state.notes) n.body ??= '';
+
 function save() {
-  const data = { subjects: state.subjects, notes: state.notes, name: state.name };
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch { /* 保存できなくても動かす */ }
+  const data = { subjects: state.subjects, notes: state.notes, name: state.name || '' };
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch { /* 保存できなくても動かす */ }
   cloud.push(data);
 }
-
-// 保存データがなければサンプルで始める (structuredClone でサンプル自体は書きかえない)
-const state = load() || { subjects: structuredClone(SAMPLE_SUBJECTS), notes: structuredClone(SAMPLE_NOTES), name: '' };
-// 初めてログインしたときは、この端末のノート (無ければサンプル) を Supabase に入れておく。
-// ログイン前に書いたノートを Supabase のノートと合わせたときも、合わせた結果を送る
 if (cloud.firstTime || cloud.merged) save();
-state.noteId = null;
-state.query = '';
-// 「新しいノート」を作る場所 (いま見ている科目・単元)
-state.sel = { subjectId: state.subjects[0]?.id ?? null, unitId: null };
 
-{
-  // ホームから index.html#n1 のように来たら、そのノートを開く
-  const fromHash = location.hash.slice(1);
-  const first = state.notes.find((n) => n.id === fromHash) || state.notes.find((n) => n.subjectId === state.sel.subjectId) || state.notes[0];
-  if (first) {
-    state.noteId = first.id;
-    state.sel = { subjectId: first.subjectId, unitId: first.unitId };
-  }
-}
+// いま見ている科目・単元 (「新しいノート」を作る場所)
+const sel = { subjectId: state.subjects[0]?.id ?? null, unitId: state.subjects[0]?.units[0]?.id ?? null };
 
-// よく使う小さな関数 (要素の取得・HTML のエスケープ・今日の日付・ノートや科目の検索)
-const $ = (sel) => document.querySelector(sel);
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const today = () => new Date().toISOString().slice(0, 10);
-const currentNote = () => state.notes.find((n) => n.id === state.noteId);
+// ---------- 小さな関数 ----------
+const $ = (s, root = document) => root.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const icon = (id) => `<svg class="i" aria-hidden="true"><use href="#i-${id}"/></svg>`;
+const live = () => state.notes.filter((n) => !n.trashed);
+const findNote = (id) => state.notes.find((n) => n.id === id);
 const findSubject = (id) => state.subjects.find((s) => s.id === id);
-const findUnit = (s, id) => (s ? s.units.find((u) => u.id === id) : undefined);
-const notesIn = (sid, unitId) => state.notes.filter((n) => n.subjectId === sid && (n.unitId || null) === (unitId || null));
-// ノートの場所を [科目名, 単元名] で返す
-const pathOf = (note) => {
-  const s = findSubject(note.subjectId);
-  const u = findUnit(s, note.unitId);
-  return [s?.name ?? '未分類', u?.name].filter(Boolean);
-};
-// '2026-11-12' → '11/12'
-const shortDate = (d) => d.slice(5).replace('-', '/');
-// SVG スプライトのアイコンを使う
-const icon = (id, cls = '') => `<svg class="i ${cls}" aria-hidden="true"><use href="#i-${id}"/></svg>`;
-// 配列を混ぜた新しい配列を返す (元の配列は変えない)
-const shuffle = (arr) => {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-};
+const findUnit = (s, id) => s?.units.find((u) => u.id === id);
+const byNewest = (a, b) => (b.updatedAt || b.updated || '').localeCompare(a.updatedAt || a.updated || '');
+const notesIn = (sid, unitId) => live().filter((n) => n.subjectId === sid && (n.unitId || null) === (unitId || null)).sort(byNewest);
+const pathOf = (n) => { const s = findSubject(n.subjectId); const u = findUnit(s, n.unitId); return [s?.name ?? '未分類', u?.name].filter(Boolean); };
+const shuffle = (arr) => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 
-// ---------- パネル見出しの日付 ----------
-{
-  const d = new Date();
-  $('#todayText').textContent = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 (${'日月火水木金土'[d.getDay()]})`;
+// 科目の色 (並び順で 紫 / セージ / テラコッタ / ローズ …)
+const COLORS = [['--accent', '--accent-soft'], ['--sage', '--sage-soft'], ['--terra', '--terra-soft'], ['--rose', '--rose-soft']];
+function colorOf(subjectId) {
+  const i = Math.max(0, state.subjects.findIndex((s) => s.id === subjectId));
+  const [c, soft] = COLORS[i % COLORS.length];
+  return `--c: var(${c}); --soft: var(${soft});`;
 }
 
-// ---------- Markdown ----------
-// 行の中の `コード` と **太字** を HTML にする
+// Markdown の記号を外した文 (抜粋・検索用)
+const plain = (md) => md.replace(/```[\s\S]*?```/g, ' ').replace(/^#{1,6}\s+/gm, '').replace(/^\s*(?:[-*]|\d+\.)\s+(?:\[[ x]\]\s+)?/gm, '')
+  .replace(/^>\s?/gm, '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1').replace(/\s*\n\s*/g, ' ').trim();
+
+// ---------- Markdown → HTML (見出し・箇条書き・番号・引用・コード・太字) ----------
 function inline(s) {
-  return esc(s)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  return esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 }
-
-// Markdown 風の文字を HTML にする (見出し・箇条書き・引用・コードだけの簡易版)
 function renderMarkdown(src) {
   const out = [];
-  let list = null; // 'ul' | 'ol'
-  let para = [];
-  let code = null;
+  let list = null, para = [], code = null;
   const flushPara = () => { if (para.length) { out.push(`<p>${para.join('<br>')}</p>`); para = []; } };
   const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
-
   for (const line of src.split('\n')) {
-    // コードブロックの中は ``` が来るまでそのまま貯める
     if (code) {
-      if (line.startsWith('```')) { out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`); code = null; }
-      else code.push(line);
+      if (line.startsWith('```')) { out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`); code = null; } else code.push(line);
       continue;
     }
     let m;
     if (line.startsWith('```')) { flushPara(); closeList(); code = []; }
-    else if ((m = line.match(/^(#{1,3})\s+(.*)$/))) { flushPara(); closeList(); out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`); }
+    else if ((m = line.match(/^(#{1,3})\s+(.*)$/))) { flushPara(); closeList(); const lv = m[1].length + 1; out.push(`<h${lv}>${inline(m[2])}</h${lv}>`); }
     else if ((m = line.match(/^\s*(?:[-*]|(\d+)\.)\s+(.*)$/))) {
       flushPara();
       const type = m[1] ? 'ol' : 'ul';
       if (list !== type) { closeList(); out.push(`<${type}>`); list = type; }
-      out.push(`<li>${inline(m[2])}</li>`);
+      out.push(`<li>${inline(m[2].replace(/^\[[ x]\]\s+/, ''))}</li>`);
     }
     else if ((m = line.match(/^>\s?(.*)$/))) { flushPara(); closeList(); out.push(`<blockquote>${inline(m[1])}</blockquote>`); }
     else if (!line.trim()) { flushPara(); closeList(); }
@@ -234,62 +198,367 @@ function renderMarkdown(src) {
   }
   if (code) out.push(`<pre><code>${esc(code.join('\n'))}</code></pre>`);
   flushPara(); closeList();
-  return out.join('\n');
+  return out.join('\n') || '<p class="empty">まだ何も書かれていません</p>';
 }
 
-// 「- **用語**: 説明」の行を用語として拾う
-function parseTerms(body) {
-  const terms = [];
-  for (const line of body.split('\n')) {
-    const m = line.match(/^\s*[-*]\s+(?:\[[ x]\]\s+)?\*\*(.+?)\*\*\s*[:：]\s*(.+)$/);
-    if (m) terms.push({ term: m[1].trim(), desc: m[2].trim() });
+// ---------- 復習 ----------
+// 今日の復習に出すノート (復習日が今日まで、または今日すでに答えたもの)。科目順
+function todayReviews() {
+  const t = today();
+  const order = (n) => state.subjects.findIndex((s) => s.id === n.subjectId);
+  return live().filter((n) => n.review && (n.review.due <= t || n.review.last === t))
+    .sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title, 'ja'));
+}
+const isDoneToday = (n) => n.review?.last === today() && n.review.due > today();
+
+// ---------- 画面の切り替え ----------
+const view = $('#view');
+let cleanup = null; // 画面を離れるときにやること (編集中の保存など)
+
+function parseRoute() {
+  const raw = location.hash.slice(1);
+  // 以前の形 (index.html#n1 / #new) にも対応する
+  if (raw === 'new') return { name: 'new' };
+  if (raw && !raw.startsWith('/')) return { name: 'note', id: raw };
+  const [path, query = ''] = (raw || '/home').split('?');
+  const p = path.split('/').filter(Boolean);
+  const q = new URLSearchParams(query);
+  if (p[0] === 'note' && p[1]) return { name: p[2] === 'ai' ? 'ai' : 'note', id: p[1] };
+  if (p[0] === 'unit') return { name: 'unit', sid: p[1], uid: p[2] === '_' ? null : p[2] };
+  if (p[0] === 'review') return { name: 'review' };
+  if (p[0] === 'search') return { name: 'search', q: q.get('q') || '' };
+  if (p[0] === 'trash') return { name: 'trash' };
+  return { name: 'home' };
+}
+const go = (hash) => { if (location.hash === hash) render(); else location.hash = hash; };
+
+function render() {
+  cleanup?.();
+  cleanup = null;
+  closeMenu();
+  document.body.classList.remove('side-open');
+  const r = parseRoute();
+  if (r.name === 'new') { addNote(sel.subjectId, sel.unitId, true); return; }
+  if (r.name === 'note' || r.name === 'ai') {
+    const n = findNote(r.id);
+    if (!n || n.trashed) { go('#/home'); return; }
+    sel.subjectId = n.subjectId; sel.unitId = n.unitId || null;
   }
-  return terms;
-}
-
-// 本文の中の検索語を <mark> で囲み、見つかった数を返す
-function highlight(root, query) {
-  if (!query) return 0;
-  const q = query.toLowerCase();
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const nodes = [];
-  while (walker.nextNode()) nodes.push(walker.currentNode);
-  let count = 0;
-  for (const node of nodes) {
-    const text = node.nodeValue;
-    const lower = text.toLowerCase();
-    let from = 0, idx = lower.indexOf(q);
-    if (idx < 0) continue;
-    const frag = document.createDocumentFragment();
-    while (idx >= 0) {
-      frag.append(text.slice(from, idx));
-      const mark = document.createElement('mark');
-      mark.dataset.hl = ''; // 検索のハイライト。保存するときは外す
-      mark.textContent = text.slice(idx, idx + q.length);
-      frag.append(mark);
-      count++;
-      from = idx + q.length;
-      idx = lower.indexOf(q, from);
-    }
-    frag.append(text.slice(from));
-    node.replaceWith(frag);
+  if (r.name === 'unit') {
+    const first = notesIn(r.sid, r.uid)[0];
+    sel.subjectId = r.sid; sel.unitId = r.uid;
+    if (first) { history.replaceState(null, '', `#/note/${first.id}`); r.name = 'note'; r.id = first.id; }
   }
-  return count;
+  renderSide(r);
+  view.scrollTop = 0;
+  ({ home: renderHome, note: renderNote, unit: renderNote, ai: renderAi, review: renderReview, search: renderSearch, trash: renderTrash })[r.name](r);
+}
+addEventListener('hashchange', render);
+
+// =========================================================
+// サイドバー
+// =========================================================
+function renderSide(r = parseRoute()) {
+  const cur = r.name === 'unit' || r.name === 'note' || r.name === 'ai' ? sel : null;
+  document.querySelectorAll('[data-nav]').forEach((a) => {
+    const on = a.dataset.nav === r.name;
+    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
+  const left = todayReviews().filter((n) => !isDoneToday(n)).length;
+  for (const b of [$('#reviewBadge'), $('#reviewBadge2')]) { b.textContent = left; b.hidden = !left; }
+
+  const tree = $('#tree');
+  if (!state.subjects.length) { tree.innerHTML = '<li class="tree-empty">「＋」で科目を追加</li>'; return; }
+  tree.innerHTML = state.subjects.map((s) => {
+    const loose = notesIn(s.id, null).length;
+    const units = [...s.units.map((u) => ({ id: u.id, name: u.name })), ...(loose ? [{ id: null, name: '単元なし' }] : [])];
+    const active = cur?.subjectId === s.id;
+    return `<li class="t-subject${active ? ' is-active' : ''}" style="${colorOf(s.id)}">
+      <div class="t-row" data-drop-subject="${s.id}">
+        <button class="t-main" type="button" data-toggle="${s.id}" aria-expanded="${!!s.open}"><span class="dot"></span><span class="t-name">${esc(s.name)}</span></button>
+        <button class="icon-btn t-more" type="button" data-menu-subject="${s.id}" aria-label="${esc(s.name)} のメニュー" aria-haspopup="menu">${icon('more')}</button>
+      </div>
+      ${s.open ? `<ul class="t-units">${units.map((u) => `
+        <li class="t-unit${active && (cur.unitId || null) === u.id ? ' is-current' : ''}">
+          <div class="t-row" data-drop-subject="${s.id}" data-drop-unit="${u.id ?? ''}">
+            <a class="t-main" href="#/unit/${s.id}/${u.id ?? '_'}"><span class="t-name">${esc(u.name)}</span></a>
+            ${u.id ? `<button class="icon-btn t-more" type="button" data-menu-unit="${s.id}/${u.id}" aria-label="${esc(u.name)} のメニュー" aria-haspopup="menu">${icon('more')}</button>` : ''}
+          </div></li>`).join('') || '<li class="tree-empty">単元はまだありません</li>'}</ul>` : ''}
+    </li>`;
+  }).join('');
 }
 
-// ---------- AI ----------
-// 失敗 (AiError) を画面に出す文にする
+$('#tree').addEventListener('click', (e) => {
+  const t = e.target.closest('[data-toggle]');
+  if (t) {
+    const s = findSubject(t.dataset.toggle);
+    s.open = !s.open;
+    save();
+    renderSide();
+    return;
+  }
+  const ms = e.target.closest('[data-menu-subject]');
+  if (ms) {
+    const sid = ms.dataset.menuSubject;
+    openMenu(ms, [
+      ['plus', '単元を追加', () => addUnit(sid)],
+      ['pencil', '名前を変更', () => renameSubject(sid)],
+      null,
+      ['trash', '科目を削除', () => deleteSubject(sid), 'danger'],
+    ]);
+    return;
+  }
+  const mu = e.target.closest('[data-menu-unit]');
+  if (mu) {
+    const [sid, id] = mu.dataset.menuUnit.split('/');
+    openMenu(mu, [
+      ['plus', 'この単元にノートを追加', () => addNote(sid, id, true)],
+      ['pencil', '名前を変更', () => renameUnit(sid, id)],
+      null,
+      ['trash', '単元を削除', () => deleteUnit(sid, id), 'danger'],
+    ]);
+  }
+});
+
+// ノート一覧のノートを、サイドバーの単元へドラッグして移動できる (PC)
+let dragId = null;
+const clearDrop = () => document.querySelectorAll('.drop-over').forEach((el) => el.classList.remove('drop-over'));
+document.addEventListener('dragstart', (e) => {
+  const it = e.target.closest?.('[data-note]');
+  if (!it) return;
+  dragId = it.dataset.note;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', dragId);
+});
+document.addEventListener('dragend', () => { dragId = null; clearDrop(); });
+$('#tree').addEventListener('dragover', (e) => {
+  const row = e.target.closest('[data-drop-subject]');
+  if (!dragId || !row) return;
+  e.preventDefault();
+  clearDrop();
+  row.classList.add('drop-over');
+});
+$('#tree').addEventListener('dragleave', (e) => { if (!e.currentTarget.contains(e.relatedTarget)) clearDrop(); });
+$('#tree').addEventListener('drop', (e) => {
+  const row = e.target.closest('[data-drop-subject]');
+  if (!dragId || !row) return;
+  e.preventDefault();
+  moveNoteTo(dragId, row.dataset.dropSubject, row.dataset.dropUnit || null);
+  clearDrop();
+});
+
+$('#newNoteBtn').addEventListener('click', () => addNote(sel.subjectId, sel.unitId, true));
+$('#addSubjectBtn').addEventListener('click', () => addSubject());
+$('#sideToggle').addEventListener('click', () => document.body.classList.toggle('side-open'));
+document.addEventListener('click', (e) => {
+  if (document.body.classList.contains('side-open') && !e.target.closest('#side, #sideToggle, .menu, dialog')) document.body.classList.remove('side-open');
+});
+
+// アカウント
+function renderAccount() {
+  const email = cloud.user?.email;
+  $('#avatar').textContent = (email || 'A').slice(0, 1).toUpperCase();
+  $('#accountLabel').textContent = email ? email.split('@')[0] : 'アカウント';
+}
+$('#accountBtn').addEventListener('click', (e) => {
+  const email = cloud.user?.email;
+  openMenu(e.currentTarget, email
+    ? [[null, `${email} でログイン中`], null, ['logout', 'ログアウト', async () => { await cloud.signOut(STORAGE_KEY); location.href = 'login.html'; }]]
+    : [[null, cloud.enabled ? 'ログインしていません（この端末だけに保存）' : 'この端末だけに保存しています'],
+       ...(cloud.enabled ? [null, ['arrow', 'ログインする', () => { location.href = 'login.html'; }]] : [])]);
+});
+
+// =========================================================
+// ホーム
+// =========================================================
+function renderHome() {
+  const list = todayReviews();
+  const done = list.filter(isDoneToday).length;
+  const notes = live();
+  const reviewing = notes.filter((n) => n.review).length;
+  const recent = [...notes].sort(byNewest).slice(0, 3);
+  const firstLeft = list.find((n) => !isDoneToday(n));
+  const R = 31, C = 2 * Math.PI * R;
+  const ratio = notes.length ? reviewing / notes.length : 0;
+
+  view.innerHTML = `<div class="deco"></div>
+  <div class="page">
+    <div class="home-head">
+      <div><p class="date-line">${jpDate()}</p><h1 class="page-title">こんにちは、今日も一歩ずつ</h1></div>
+      <form class="searchbox" id="homeSearch" role="search">${icon('search')}<input type="search" name="q" placeholder="ノートを検索" aria-label="ノートを検索"></form>
+    </div>
+    <div class="home-grid">
+      <section class="card review-card" aria-label="今日の復習">
+        <div class="card-head"><h2>${icon('target')}今日の復習</h2><span class="count num">${done} / ${list.length} 完了</span></div>
+        <div class="bar sage"><i style="width:${list.length ? (done / list.length) * 100 : 0}%"></i></div>
+        ${list.length ? `<ul class="today-list">${list.map((n) => `
+          <li class="${isDoneToday(n) ? 'is-done' : ''}"><span class="check-dot">${isDoneToday(n) ? icon('check') : ''}</span>
+            <a href="#/note/${n.id}">${esc(n.title || '無題のノート')}</a><span class="subj">${esc(pathOf(n)[0])}</span></li>`).join('')}</ul>`
+        : '<p class="empty-line">今日の復習はありません。ノートの「復習リスト」をオンにすると、ここに出ます。</p>'}
+        ${firstLeft ? `<a class="btn btn-primary" href="#/review">続きから復習する ${icon('arrow')}</a>` : list.length ? '<p class="hint">今日の分はおわりました。おつかれさま！</p>' : ''}
+      </section>
+      <section class="stat-card" aria-label="マイノート">
+        <h2>マイノート</h2>
+        <div class="stat-body">
+          <div class="ring"><svg viewBox="0 0 74 74"><circle cx="37" cy="37" r="${R}" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="7"/>
+            <circle cx="37" cy="37" r="${R}" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round" stroke-dasharray="${C * ratio} ${C}"/></svg>
+            <span>${notes.length}</span></div>
+          <div><b>${state.subjects.length}科目・${notes.length}ノート</b><small>うち ${reviewing}件を復習中</small></div>
+        </div>
+      </section>
+    </div>
+    <div class="section-head"><h2>最近のノート</h2><a class="link-btn" href="#/search">すべて見る</a></div>
+    <div class="note-cards">
+      ${recent.map((n) => `<a class="card note-card" href="#/note/${n.id}" style="${colorOf(n.subjectId)}">
+        <span class="thumb"><i></i><i></i><i></i></span><b>${esc(n.title || '無題のノート')}</b><small>${esc(pathOf(n)[0])} · ${when(n)}</small></a>`).join('')}
+      <button class="card note-card add" type="button" id="homeNew">${icon('pencil')}新しいノートを書く</button>
+    </div>
+  </div>`;
+  $('#homeNew').addEventListener('click', () => addNote(sel.subjectId, sel.unitId, true));
+  $('#homeSearch').addEventListener('submit', (e) => {
+    e.preventDefault();
+    go(`#/search?q=${encodeURIComponent(e.currentTarget.q.value.trim())}`);
+  });
+}
+
+// =========================================================
+// ノート編集
+// =========================================================
+let saveTimer = null;
+let lastSavedAt = null;
+
+function renderNote(r) {
+  const note = r.id ? findNote(r.id) : null;
+  const subject = findSubject(sel.subjectId);
+  const unit = findUnit(subject, sel.unitId);
+  const siblings = subject ? notesIn(subject.id, sel.unitId) : [];
+
+  view.innerHTML = `<div class="note-layout">
+    <aside class="note-list" aria-label="この単元のノート">
+      <p class="nl-sub">${esc(subject?.name ?? '')}</p>
+      <h2 class="nl-title">${esc(unit?.name ?? (subject ? '単元なし' : 'ノート'))}</h2>
+      ${siblings.map((n) => `<a class="nl-item" href="#/note/${n.id}" data-note="${n.id}" draggable="true" ${n.id === note?.id ? 'aria-current="page"' : ''}>
+        <b data-title-of="${n.id}">${esc(n.title || '無題のノート')}</b><small>${when(n)}${n.review ? ' · 復習中' : ''}</small></a>`).join('')}
+      ${subject ? '<button class="nl-add" type="button" id="unitAdd">' + icon('plus') + 'この単元にノートを追加</button>' : ''}
+    </aside>
+    ${note ? editorHtml(note) : `<section class="editor"><div class="editor-empty">
+      <p>${subject ? 'この単元にはまだノートがありません' : '左の「＋」から科目を追加しましょう'}</p>
+      ${subject ? `<button class="btn btn-primary" type="button" id="emptyAdd">${icon('plus')}ノートを書く</button>` : ''}</div></section>`}
+  </div>`;
+  $('#unitAdd')?.addEventListener('click', () => addNote(sel.subjectId, sel.unitId, true));
+  $('#emptyAdd')?.addEventListener('click', () => addNote(sel.subjectId, sel.unitId, true));
+  if (note) bindEditor(note);
+}
+
+function editorHtml(note) {
+  return `<section class="editor">
+    <div class="editor-bar">
+      <nav class="crumbs" aria-label="ノートの場所">${pathOf(note).map(esc).join('<span class="sep">›</span>')}</nav>
+      <span class="chip chip-saved" id="saveChip" role="status"></span>
+      <label class="switch"><input type="checkbox" id="reviewToggle" ${note.review ? 'checked' : ''}><span class="knob"></span>復習リスト</label>
+      <a class="btn btn-primary" href="#/note/${note.id}/ai">${icon('sparkle')}AI 補助</a>
+      <button class="icon-btn" type="button" id="noteMore" aria-label="ノートのメニュー" aria-haspopup="menu">${icon('more')}</button>
+    </div>
+    <input class="title-input" id="titleInput" type="text" maxlength="100" placeholder="タイトル" aria-label="ノートのタイトル" value="${esc(note.title)}">
+    <div class="panes">
+      <div class="card pane">
+        <label class="pane-label" for="mdInput">Markdown</label>
+        <textarea class="md-input" id="mdInput" maxlength="${MAX_CHARS}" spellcheck="false"
+          placeholder="## 見出し&#10;- 箇条書き&#10;- **用語**: 説明（太字の用語は確認問題に使われます）">${esc(note.body)}</textarea>
+        <p class="pane-foot" id="charCount"></p>
+      </div>
+      <div class="card pane preview">
+        <p class="pane-label">プレビュー</p>
+        <div class="md" id="preview"></div>
+      </div>
+    </div>
+  </section>`;
+}
+
+function bindEditor(note) {
+  const md = $('#mdInput');
+  const title = $('#titleInput');
+  const chip = $('#saveChip');
+  const showSaved = () => {
+    const t = new Date(note.updatedAt || Date.now());
+    chip.className = 'chip chip-saved';
+    chip.innerHTML = `${icon('check')}自動保存済み · ${hhmm(t)} · 版 ${note.version || 1}`;
+  };
+  const count = () => {
+    const c = $('#charCount');
+    c.textContent = `${md.value.length.toLocaleString()} / ${MAX_CHARS.toLocaleString()} 文字`;
+    c.classList.toggle('over', md.value.length >= MAX_CHARS);
+  };
+  const preview = () => { $('#preview').innerHTML = renderMarkdown(md.value); };
+  const commit = () => {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    if (note.body === md.value && note.title === title.value.trim()) return;
+    note.body = md.value;
+    note.title = title.value.trim();
+    delete note.html; // 以前のリッチテキストの見た目は使わない (本文は body が正)
+    note.updated = today();
+    note.updatedAt = new Date().toISOString();
+    note.version = (note.version || 1) + 1;
+    save();
+    showSaved();
+    const small = document.querySelector(`[data-note="${note.id}"] small`);
+    if (small) small.textContent = `${when(note)}${note.review ? ' · 復習中' : ''}`;
+  };
+  const changed = () => {
+    chip.className = 'chip chip-saving';
+    chip.textContent = '保存中…';
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(commit, 700);
+  };
+  preview(); count(); showSaved();
+  md.addEventListener('input', () => { preview(); count(); changed(); });
+  title.addEventListener('input', () => {
+    const b = document.querySelector(`[data-title-of="${note.id}"]`);
+    if (b) b.textContent = title.value.trim() || '無題のノート';
+    changed();
+  });
+  title.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); md.focus(); } });
+  // Tab で字下げ (箇条書きを入れ子にしやすくする)
+  md.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab' || e.isComposing) return;
+    e.preventDefault();
+    document.execCommand('insertText', false, '  ');
+  });
+  $('#reviewToggle').addEventListener('change', (e) => {
+    if (e.target.checked) note.review = { stage: 0, due: addDays(today(), 1), last: null };
+    else delete note.review;
+    save();
+    renderSide();
+    toast(e.target.checked ? '復習リストに入れました。明日の「今日の復習」に出ます' : '復習リストから外しました');
+  });
+  $('#noteMore').addEventListener('click', (e) => openMenu(e.currentTarget, [
+    ['photo', '写真から用語を取り込む', () => openPhoto(note)],
+    ['move', '別の単元へ移動', () => openMove(note.id)],
+    null,
+    ['trash', 'ゴミ箱へ移動', () => trashNote(note.id), 'danger'],
+  ]));
+  cleanup = commit;
+  if (focusTitleOnce) { focusTitleOnce = false; title.focus(); }
+  lastSavedAt = note.updatedAt;
+}
+let focusTitleOnce = false;
+addEventListener('pagehide', () => cleanup?.());
+
+// =========================================================
+// AI 補助 (要約 / 確認問題5問)
+// =========================================================
+const summaryCache = new Map(); // ノートの id → { body, text }
+const quizCache = new Map();    // ノートの id → { body, promise }
+let aiTab = 'summary';
+let aiRun = 0; // 画面を書きかえるたびに増やす (古い待ちが後から書きかえないため)
+
 const aiErrorText = (e) => ai.ERROR_MESSAGES[e?.kind] || ai.ERROR_MESSAGES.unknown;
-
-// AI を使う前の確認画面の文 (機能ごと)
 const AI_CONFIRM = {
-  quiz: { title: 'AIで問題を作成しますか？', text: 'ノートの内容から、4択問題を15問作ります。', ok: '作成する' },
-  check: { title: 'AIで説明をチェックしますか？', text: '書いた説明をノートの説明と比べて、点数とアドバイスを出します。', ok: 'チェックする' },
-  summary: { title: 'AIで要点をまとめますか？', text: 'ノートの内容を3〜5行にまとめます。', ok: 'まとめる' },
+  quiz: { title: 'AIで確認問題を作りますか？', text: 'ノートの内容から、確認問題を5問作ります。', ok: '作成する' },
+  summary: { title: 'AIで要約しますか？', text: 'ノートの内容を3〜5行にまとめます。', ok: '要約する' },
   photo: { title: 'この写真から用語を読み取りますか？', text: '写真から用語と説明を読み取ります。1〜2分かかることがあります。', ok: '読み取る' },
 };
-
-// AI を使う前に確認画面を出す。「OK」なら true、キャンセル・×・Esc なら false
 function confirmAi(kind) {
   const c = AI_CONFIRM[kind];
   const d = $('#aiConfirm');
@@ -299,911 +568,523 @@ function confirmAi(kind) {
   $('#aiConfirmNote').textContent = ai.isDemo
     ? 'デモ版のため、用意したサンプルの出力が表示されます。'
     : (kind === 'photo' ? '写真' : 'ノートの内容') + 'がAIに送られます。AIを使える回数には1日の上限があります。';
-  d.returnValue = '';
-  d.showModal();
-  $('#aiConfirmOk').focus();
-  return new Promise((resolve) => {
-    // ボタンを押した時点で決める (close イベントは、ブラウザによって届くのが遅れることがあるため)。
-    // Esc などで閉じたときは close で決める。決まったら、ここで付けた見張りはすべて外す
-    const watch = new AbortController();
-    const done = (yes) => { watch.abort(); resolve(yes); };
-    d.querySelector('form').addEventListener('submit', (e) => done(e.submitter?.value === 'ok'), { signal: watch.signal });
-    d.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => done(false), { signal: watch.signal }));
-    d.addEventListener('close', () => done(d.returnValue === 'ok'), { signal: watch.signal });
+  return ask(d, $('#aiConfirmOk')).then((v) => v === 'ok');
+}
+
+function renderAi(r) {
+  const note = findNote(r.id);
+  view.innerHTML = `<div class="ai-layout">
+    <section class="ai-main">
+      <div class="crumbs"><a class="link-btn" href="#/note/${note.id}">${icon('back')}編集に戻る</a>
+        <span>${pathOf(note).map(esc).join('<span class="sep"> › </span>')}</span></div>
+      <h1 class="page-title">${esc(note.title || '無題のノート')}</h1>
+      <article class="card read-card md">${renderMarkdown(note.body)}</article>
+    </section>
+    <aside class="ai-side" aria-label="AI 補助">
+      <div class="ai-side-head"><h2>${icon('sparkle')}AI 補助</h2>${ai.isDemo ? '<span class="chip chip-demo">デモ出力です</span>' : ''}</div>
+      <div class="seg" role="tablist">
+        <button type="button" role="tab" data-tab="summary" aria-selected="${aiTab === 'summary'}">要約</button>
+        <button type="button" role="tab" data-tab="quiz" aria-selected="${aiTab === 'quiz'}">確認問題5問</button>
+      </div>
+      <div class="ai-body" id="aiBody" aria-live="polite"></div>
+      <p class="ai-foot">ノートを書き換えるまでは、同じ結果を再利用します</p>
+    </aside>
+  </div>`;
+  view.querySelector('.seg').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tab]');
+    if (!b) return;
+    aiTab = b.dataset.tab;
+    view.querySelectorAll('[data-tab]').forEach((x) => x.setAttribute('aria-selected', x === b));
+    showAiTab(note);
+  });
+  showAiTab(note);
+  cleanup = () => { aiRun++; };
+}
+
+function showAiTab(note) {
+  const run = ++aiRun;
+  const body = $('#aiBody');
+  if (!note.body.trim()) { body.innerHTML = '<div class="ai-intro">ノートに内容を書くと、AI が要約や確認問題を作れます。</div>'; return; }
+  if (aiTab === 'summary') showSummary(note, body, run);
+  else showQuiz(note, body, run);
+}
+
+// --- 要約 ---
+async function showSummary(note, body, run) {
+  const cached = summaryCache.get(note.id);
+  if (cached && cached.body === note.body) {
+    body.innerHTML = `<div class="summary-out ai-output"></div>`;
+    $('.summary-out', body).textContent = cached.text;
+    return;
+  }
+  body.innerHTML = `<div class="ai-intro"><p>ノートの大事なところを、3〜5行の箇条書きにまとめます。</p>
+    <button class="btn btn-primary btn-block" type="button" id="doSummary">${icon('sparkle')}要約を作る</button></div>`;
+  $('#doSummary').addEventListener('click', async () => {
+    if (!(await confirmAi('summary')) || run !== aiRun) return;
+    const out = document.createElement('div');
+    out.className = 'summary-out';
+    body.replaceChildren(out);
+    showThinking(out);
+    const src = note.body;
+    try {
+      const r = await ai.generate({ feature: 'summary', input: src });
+      if (run !== aiRun) return;
+      await streamInto(out, ai.streamText(r.text), { isDemo: false });
+      summaryCache.set(note.id, { body: src, text: r.text });
+    } catch (e) {
+      if (run === aiRun) body.innerHTML = `<p class="ai-error">${esc(aiErrorText(e))}</p>`;
+    }
   });
 }
 
-// AI のテストを画面で使える形にそろえる。使えなければ null
+// --- 確認問題 (自分の言葉で答えて、答え合わせ) ---
 function validQuiz(questions) {
   if (!Array.isArray(questions)) return null;
-  const ok = questions
-    .filter((q) => q && q.text && Array.isArray(q.choices) && q.choices.length === 4 && q.choices.includes(q.answer))
-    .map((q) => ({ text: String(q.text), answer: q.answer, choices: shuffle(q.choices.map(String)) }));
+  const ok = questions.filter((q) => q && q.text && q.answer).map((q) => ({ text: String(q.text), answer: String(q.answer) }));
   return ok.length ? ok : null;
 }
-
-// =========================================================
-// 左: 科目 › 単元 › ノート のツリー
-// =========================================================
-// ツリーのノート1行分の HTML
-function noteRow(n) {
-  const cur = n.id === state.noteId;
-  return `
-    <li role="treeitem" aria-selected="${cur}">
-      <div class="row note-row ${cur ? 'is-current' : ''}" draggable="true" data-note="${n.id}" data-drop="${n.subjectId}|${n.unitId || ''}">
-        <button class="row-main" type="button" data-act="open" data-id="${n.id}">
-          ${icon('note')}<span class="label-text">${esc(n.title || '無題のノート')}</span><span class="sub">${shortDate(n.updated)}</span>
-        </button>
-        <button class="more" type="button" data-act="menu" data-kind="note" data-id="${n.id}" aria-haspopup="menu" aria-label="「${esc(n.title || '無題のノート')}」のメニュー">${icon('more')}</button>
-      </div>
-    </li>`;
-}
-
-// 左のツリーを描き直す
-function renderSidebar() {
-  const tree = $('#tree');
-  const q = state.query.trim().toLowerCase();
-
-  // 検索中: ツリーの代わりに、場所つきの結果一覧
-  if (q) {
-    const hits = state.notes.filter((n) => (n.title + '\n' + n.body).toLowerCase().includes(q));
-    tree.innerHTML = `<li class="result-head">検索結果 ${hits.length}件</li>` + (hits.length
-      ? hits.map((n) => `
-        <li role="treeitem" aria-selected="${n.id === state.noteId}">
-          <div class="row note-row ${n.id === state.noteId ? 'is-current' : ''}">
-            <button class="row-main" type="button" data-act="open" data-id="${n.id}">
-              ${icon('note')}<span class="label-text">${esc(n.title || '無題のノート')}</span><span class="sub">${esc(pathOf(n).join(' › '))}</span>
-            </button>
-          </div>
-        </li>`).join('')
-      : '<li class="empty">見つかりませんでした</li>');
-    return;
-  }
-
-  if (!state.subjects.length) {
-    tree.innerHTML = `<li class="tree-empty">科目がまだありません<button class="btn" type="button" data-act="add-subject">${icon('plus')}科目を追加</button></li>`;
-    return;
-  }
-
-  // 科目ごとに「単元 (中のノート)」→「科目直下のノート」の順に並べる
-  tree.innerHTML = state.subjects.map((s) => {
-    const count = state.notes.filter((n) => n.subjectId === s.id).length;
-    const rootNotes = notesIn(s.id, null);
-    const children = s.units.map((u) => {
-      const notes = notesIn(s.id, u.id);
-      return `
-        <li role="treeitem" class="t-unit" aria-expanded="${u.open}">
-          <div class="row" data-drop="${s.id}|${u.id}">
-            <button class="row-main" type="button" data-act="toggle" data-kind="unit" data-sid="${s.id}" data-id="${u.id}">
-              ${icon('chev', 'chev')}<span class="label-text">${esc(u.name)}</span><span class="sub">${notes.length}</span>
-            </button>
-            <button class="more" type="button" data-act="menu" data-kind="unit" data-sid="${s.id}" data-id="${u.id}" aria-haspopup="menu" aria-label="単元「${esc(u.name)}」のメニュー">${icon('more')}</button>
-          </div>
-          ${u.open ? `<ul role="group">${notes.map(noteRow).join('') || '<li class="empty">ノートがありません</li>'}</ul>` : ''}
-        </li>`;
-    }).join('') + rootNotes.map(noteRow).join('');
-
-    return `
-      <li role="treeitem" class="t-subject" aria-expanded="${s.open}">
-        <div class="row" data-drop="${s.id}|">
-          <button class="row-main" type="button" data-act="toggle" data-kind="subject" data-id="${s.id}">
-            ${icon('chev', 'chev')}<span class="label-text">${esc(s.name)}</span><span class="sub">${count}</span>
-          </button>
-          <button class="more" type="button" data-act="menu" data-kind="subject" data-id="${s.id}" aria-haspopup="menu" aria-label="科目「${esc(s.name)}」のメニュー">${icon('more')}</button>
-        </div>
-        ${s.open ? `<ul role="group">${children || '<li class="empty">単元もノートもありません</li>'}</ul>` : ''}
-      </li>`;
-  }).join('');
-}
-
-// =========================================================
-// ノート本文 (リッチテキスト)
-// =========================================================
-const editor = $('#editor');
-const PLACEHOLDER = editor.dataset.placeholder;
-const htmlOf = (note) => note.html ?? renderMarkdown(note.body || '');
-
-// 検索のハイライト (mark[data-hl]) を外した本文
-function unmark(root) {
-  root.querySelectorAll('mark[data-hl]').forEach((m) => m.replaceWith(...m.childNodes));
-  root.normalize();
-}
-// ハイライトを外した本文のコピー (保存用)
-function cleanCopy() {
-  const clone = editor.cloneNode(true);
-  unmark(clone);
-  return clone;
-}
-
-// 本文 → Markdown 風の文字 (用語の読み取り・検索・ホーム画面用)
-function inlineMd(node) {
-  let s = '';
-  node.childNodes.forEach((c) => {
-    if (c.nodeType === 3) { s += c.nodeValue; return; }
-    if (c.nodeType !== 1) return;
-    const t = c.tagName;
-    const bold = t === 'B' || t === 'STRONG' || (t === 'SPAN' && /bold|[6-9]00/.test(c.style.fontWeight));
-    if (t === 'BR') s += ' ';
-    else if (t === 'CODE') s += '`' + c.textContent + '`';
-    else if (bold) { const inner = inlineMd(c); s += inner.trim() ? `**${inner}**` : inner; }
-    else s += inlineMd(c);
+function quizFor(note) {
+  const c = quizCache.get(note.id);
+  if (c && c.body === note.body) return c.promise;
+  const promise = ai.generate({ feature: 'quiz', input: note.body, options: { count: 5 } }).then((r) => {
+    const qs = validQuiz(r.data.questions);
+    if (!qs) throw new ai.AiError('unknown');
+    return qs;
   });
-  return s.replace(/\*\*\*\*/g, '');
+  quizCache.set(note.id, { body: note.body, promise });
+  promise.catch(() => quizCache.delete(note.id));
+  return promise;
 }
-// ブロック (見出し・リスト・表など) を1行ずつ Markdown 風の文字にする
-function blockMd(el, out) {
-  for (const c of el.childNodes) {
-    if (c.nodeType === 3) { if (c.nodeValue.trim()) out.push(c.nodeValue.trim()); continue; }
-    if (c.nodeType !== 1) continue;
-    const t = c.tagName;
-    if (/^H[1-6]$/.test(t)) out.push('#'.repeat(Math.min(3, +t[1])) + ' ' + inlineMd(c).trim());
-    else if (t === 'UL' || t === 'OL') {
-      const check = c.classList.contains('checklist');
-      [...c.children].forEach((li, i) => out.push(`${t === 'OL' ? `${i + 1}.` : '-'} ${check ? (li.classList.contains('done') ? '[x] ' : '[ ] ') : ''}${inlineMd(li).trim()}`));
-    }
-    else if (t === 'BLOCKQUOTE') out.push('> ' + inlineMd(c).trim());
-    else if (t === 'PRE') out.push('```\n' + c.textContent + '\n```');
-    else if (t === 'TABLE') c.querySelectorAll('tr').forEach((tr) => out.push([...tr.cells].map((td) => td.textContent.trim()).join(' | ')));
-    else if (c.querySelector('h1,h2,h3,h4,h5,h6,ul,ol,table,blockquote,pre,p,div')) blockMd(c, out);
-    else { const s = inlineMd(c).trim(); if (s) out.push(s); }
-  }
-}
-
-// 本文を note.html (見た目) と note.body (文字) の両方に保存する
-function saveEditor() {
-  const note = currentNote();
-  if (!note) return;
-  const clean = cleanCopy();
-  note.html = clean.innerHTML;
-  const out = [];
-  blockMd(clean, out);
-  note.body = out.join('\n');
-  touch(note);
-}
-
-// 中央のノート画面 (タイトル・場所・本文) を表示する
-function renderNote() {
-  const note = currentNote();
-  editor.contentEditable = note ? 'true' : 'false';
-  if (!note) {
-    $('#titleInput').value = '';
-    $('#crumbs').innerHTML = '';
-    $('#noteMeta').textContent = '';
-    editor.innerHTML = '';
-    editor.dataset.placeholder = 'ノートを選ぶか、「＋」で新しく作成してください';
-    editor.dataset.noteId = '';
+async function showQuiz(note, body, run) {
+  const c = quizCache.get(note.id);
+  if (!(c && c.body === note.body)) {
+    body.innerHTML = `<div class="ai-intro"><p>ノートの内容から確認問題を5問作ります。答えを自分の言葉で書いてから、答え合わせをしましょう。</p>
+      <button class="btn btn-primary btn-block" type="button" id="doQuiz">${icon('sparkle')}確認問題を作る</button></div>`;
+    $('#doQuiz').addEventListener('click', async () => {
+      if (!(await confirmAi('quiz')) || run !== aiRun) return;
+      startQuiz(note, body, run);
+    });
     return;
   }
-  editor.dataset.placeholder = PLACEHOLDER;
-  if (document.activeElement !== $('#titleInput')) $('#titleInput').value = note.title;
-  $('#crumbs').innerHTML = `
-    <button class="crumb-btn" type="button" id="moveBtn" title="別の科目・単元へ移動">
-      ${pathOf(note).map(esc).join('<span class="sep">›</span>')}${icon('down')}
-    </button>`;
-  $('#noteMeta').textContent = `更新 ${note.updated.replaceAll('-', '.')}`;
-  // 書いている最中のノートは、本文を作り直さない (カーソルが飛ぶので)
-  if (editor.dataset.noteId !== note.id || document.activeElement !== editor) {
-    editor.innerHTML = htmlOf(note);
-    editor.dataset.noteId = note.id;
+  startQuiz(note, body, run);
+}
+async function startQuiz(note, body, run) {
+  showThinking(body, '考え中… 確認問題を作っています');
+  let pool;
+  try { pool = await quizFor(note); } catch (e) {
+    if (run === aiRun) body.innerHTML = `<p class="ai-error">${esc(aiErrorText(e))}</p>`;
+    return;
   }
-  renderPreview();
+  if (run !== aiRun) return;
+  const qs = shuffle(pool).slice(0, 5);
+  let i = 0, score = 0;
+  const step = () => {
+    if (run !== aiRun) return;
+    if (i >= qs.length) {
+      body.innerHTML = `<div class="result"><p class="hint">おつかれさま！</p><p class="big num">${score} / ${qs.length}</p>
+        <p>${score === qs.length ? '全問正解です。' : '「忘れていた」問題は、ノートを見直しておきましょう。'}</p>
+        <button class="btn btn-primary" type="button" id="again">もう一度解く</button></div>`;
+      $('#again').addEventListener('click', () => startQuiz(note, body, run));
+      return;
+    }
+    const q = qs[i];
+    body.innerHTML = `<div class="q-progress"><b class="num">${i + 1} / ${qs.length}</b><div class="bar"><i style="width:${((i + 1) / qs.length) * 100}%"></i></div></div>
+      <h3 class="q-title">${esc(q.text)}</h3>
+      <label class="q-label" for="qAnswer">自分の言葉で答えてみよう</label>
+      <textarea class="textarea" id="qAnswer" placeholder="ここに入力してください…"></textarea>
+      <button class="btn btn-primary btn-lg btn-block" type="button" id="qCheck">答え合わせ</button>`;
+    $('#qAnswer').focus();
+    $('#qCheck').addEventListener('click', () => {
+      const mine = $('#qAnswer').value.trim();
+      const box = document.createElement('div');
+      box.innerHTML = `<div class="answer-box"><b>答え</b><p>${esc(q.answer)}</p>${mine ? `<span class="mine">あなたの答え：${esc(mine)}</span>` : ''}</div>
+        <p class="q-label" style="margin-top:14px">合っていましたか？</p>
+        <div class="judge" style="margin-top:8px"><button class="btn" type="button" data-judge="0">ちがった</button><button class="btn btn-primary" type="button" data-judge="1">合っていた</button></div>`;
+      $('#qCheck').replaceWith(box);
+      $('#qAnswer').readOnly = true;
+      box.querySelector('.judge').addEventListener('click', (e) => {
+        const j = e.target.closest('[data-judge]');
+        if (!j) return;
+        score += Number(j.dataset.judge);
+        i++;
+        step();
+      });
+      box.querySelector('[data-judge="1"]').focus();
+    });
+  };
+  step();
 }
 
-// 検索語を本文の中で光らせる
-function renderPreview() {
-  if (!currentNote()) return;
-  unmark(editor);
-  const q = state.query.trim();
-  const count = highlight(editor, q);
-  $('#searchCount').textContent = q ? `${count}件` : '';
-}
+// =========================================================
+// 今日の復習
+// =========================================================
+let reviewPick = null;
+function renderReview() {
+  const list = todayReviews();
+  const done = list.filter(isDoneToday).length;
+  const cur = list.find((n) => n.id === reviewPick && !isDoneToday(n)) || list.find((n) => !isDoneToday(n));
+  reviewPick = cur?.id ?? null;
 
-// ノートが入っている科目・単元をツリーで開いておく
-function openContainersOf(note) {
-  const s = findSubject(note.subjectId);
-  if (s) s.open = true;
-  const u = findUnit(s, note.unitId);
-  if (u) u.open = true;
-}
-
-// ノートを選んで、画面全体を切りかえる
-function selectNote(id) {
-  state.noteId = id;
-  const note = currentNote();
-  if (note) {
-    state.sel = { subjectId: note.subjectId, unitId: note.unitId };
-    openContainersOf(note);
+  let card;
+  if (!list.length) {
+    card = `<div class="card rv-done"><p class="big">今日の復習はありません</p>
+      <p class="hint">ノートの「復習リスト」をオンにすると、1日後・3日後・7日後・14日後・30日後に復習が回ってきます。</p></div>`;
+  } else if (!cur) {
+    card = `<div class="card rv-done"><p class="big">今日の分はおわりました</p><p class="hint">おつかれさま！ 明日もまた一歩ずつ。</p>
+      <a class="btn" href="#/home">ホームへ戻る</a></div>`;
+  } else {
+    const stage = Math.min(cur.review.stage || 0, INTERVALS.length - 1);
+    const next = INTERVALS[Math.min(stage + 1, INTERVALS.length - 1)];
+    const [subj, unit] = pathOf(cur);
+    const text = plain(cur.body);
+    card = `<article class="card rv-card" style="${colorOf(cur.subjectId)}">
+        <div class="chips"><span class="chip">${esc(subj)}</span>${unit ? esc(unit) : ''}</div>
+        <h2>${esc(cur.title || '無題のノート')}</h2>
+        <p class="excerpt">${esc(text.length > 150 ? text.slice(0, 150) + '…' : text) || '（本文なし）'}</p>
+        <a class="link-btn" href="#/note/${cur.id}">ノート全体を開く ${icon('chev')}</a>
+        <div class="interval"><p class="hint">復習の間隔</p>
+          <div class="steps">${INTERVALS.map((d, k) => `<span class="${k <= stage ? 'on' : ''} ${k === stage ? 'now' : ''}">${d}日</span>`).join('')}</div></div>
+      </article>
+      <div class="rv-actions">
+        <button class="btn btn-lg" type="button" data-answer="forgot">忘れていた<small>明日もう一度</small></button>
+        <button class="btn btn-primary btn-lg" type="button" data-answer="ok">覚えていた<small>次は${next}日後</small></button>
+      </div>`;
   }
-  $('#summaryBox').hidden = true;
-  $('#summaryBtn').setAttribute('aria-pressed', false);
-  renderSidebar();
-  renderNote();
-  resetAiPanel();
+
+  view.innerHTML = `<div class="deco"></div><div class="page">
+    <div class="review-head">
+      <div><h1 class="page-title">今日の復習</h1><p class="page-sub">${jpDate()} · 復習日が今日までのノートを科目順に表示</p></div>
+      ${list.length ? `<div class="review-progress"><div class="bar"><i style="width:${(done / list.length) * 100}%"></i></div><b class="num">${done}/${list.length}</b></div>` : ''}
+    </div>
+    <div class="review-grid">
+      <div class="rv-list">${list.map((n) => `<button class="rv-item${isDoneToday(n) ? ' is-done' : ''}" type="button" data-pick="${n.id}" style="${colorOf(n.subjectId)}" ${n.id === cur?.id ? 'aria-current="true"' : ''}>
+        <i class="dot"></i><span><b>${esc(n.title || '無題のノート')}</b><small>${esc(pathOf(n)[0])}</small></span>
+        ${n.id === cur?.id ? '<em>いま</em>' : isDoneToday(n) ? `<em>${icon('check')}</em>` : ''}</button>`).join('')}</div>
+      <div>${card}</div>
+    </div>
+  </div>`;
+
+  view.querySelector('.rv-list')?.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-pick]');
+    if (!b || isDoneToday(findNote(b.dataset.pick))) return;
+    reviewPick = b.dataset.pick;
+    renderReview();
+  });
+  view.querySelector('.rv-actions')?.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-answer]');
+    if (!b) return;
+    const rv = cur.review;
+    if (b.dataset.answer === 'ok') {
+      rv.stage = Math.min((rv.stage || 0) + 1, INTERVALS.length - 1);
+      rv.due = addDays(today(), INTERVALS[rv.stage]);
+    } else {
+      rv.stage = 0;
+      rv.due = addDays(today(), 1);
+    }
+    rv.last = today();
+    save();
+    reviewPick = null;
+    renderSide();
+    renderReview();
+  });
 }
 
-// 更新日を今日にして保存する
-function touch(note) {
-  note.updated = today();
-  save();
+// =========================================================
+// 検索
+// =========================================================
+function renderSearch(r) {
+  view.innerHTML = `<div class="search-page">
+    <h1 class="page-title">ノートを探す</h1>
+    <form class="searchbox searchbox-lg" id="searchForm" role="search">${icon('search')}
+      <input type="search" name="q" value="${esc(r.q)}" placeholder="キーワードを入力" aria-label="キーワード"><span class="hint">Enter で検索</span></form>
+    <p class="search-meta" id="searchMeta"></p>
+    <div class="results" id="results"></div>
+  </div>`;
+  const input = $('#searchForm').q;
+  $('#searchForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    history.replaceState(null, '', `#/search?q=${encodeURIComponent(input.value.trim())}`);
+    showResults(input.value.trim());
+  });
+  showResults(r.q);
+  if (!r.q) input.focus();
+}
+function hl(text, q) {
+  if (!q) return esc(text);
+  const lower = text.toLowerCase(), k = q.toLowerCase();
+  let out = '', from = 0, i;
+  while ((i = lower.indexOf(k, from)) >= 0) { out += esc(text.slice(from, i)) + `<mark>${esc(text.slice(i, i + k.length))}</mark>`; from = i + k.length; }
+  return out + esc(text.slice(from));
+}
+function snippet(text, q) {
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  if (i < 0) return text.slice(0, 60) + (text.length > 60 ? '…' : '');
+  const s = Math.max(0, i - 24), e = Math.min(text.length, i + q.length + 36);
+  return (s > 0 ? '…' : '') + text.slice(s, e) + (e < text.length ? '…' : '');
+}
+function showResults(q) {
+  const meta = $('#searchMeta');
+  const box = $('#results');
+  const k = q.toLowerCase();
+  const hits = live().filter((n) => !k || [n.title, n.body, ...pathOf(n)].some((t) => (t || '').toLowerCase().includes(k))).sort(byNewest);
+  const shown = hits.slice(0, SEARCH_LIMIT);
+  meta.textContent = q
+    ? `${hits.length}件 · 更新日の新しい順 · 自分のノートだけが対象（最大${SEARCH_LIMIT}件）`
+    : `すべてのノート ${hits.length}件 · 更新日の新しい順`;
+  box.innerHTML = shown.length ? shown.map((n) => `<a class="card result-item" href="#/note/${n.id}">
+      <span class="crumbs">${pathOf(n).map((p) => hl(p, q)).join('<span class="sep">›</span>')}</span>
+      <b>${hl(n.title || '無題のノート', q)}</b>
+      <p>${hl(snippet(plain(n.body), q), q)}</p>
+      <time>${when(n)}</time></a>`).join('')
+    : '<p class="empty-line">見つかりませんでした。別のことばで探してみてください。</p>';
+}
+
+// =========================================================
+// ゴミ箱
+// =========================================================
+function renderTrash() {
+  const items = state.notes.filter((n) => n.trashed).sort((a, b) => b.trashed.localeCompare(a.trashed));
+  view.innerHTML = `<div class="page">
+    <h1 class="page-title">ゴミ箱</h1>
+    <p class="page-sub">消したノートはここに残ります。元に戻すか、完全に削除できます。</p>
+    <div class="trash-list">${items.map((n) => `<div class="card trash-item">
+      <div><b>${esc(n.title || '無題のノート')}</b><small>${esc(pathOf(n).join(' › '))} · ${new Date(n.trashed).toLocaleDateString('ja-JP')} に削除</small></div>
+      <button class="btn" type="button" data-restore="${n.id}">元に戻す</button>
+      <button class="btn" type="button" data-purge="${n.id}">完全に削除</button></div>`).join('')
+      || '<p class="empty-line">ゴミ箱は空です。</p>'}</div>
+  </div>`;
+  view.querySelector('.trash-list').addEventListener('click', (e) => {
+    const r = e.target.closest('[data-restore]');
+    if (r) {
+      const n = findNote(r.dataset.restore);
+      if (!findSubject(n.subjectId)) {
+        if (!state.subjects.length) state.subjects.push({ id: uid('s'), name: '未分類', open: true, units: [] });
+        n.subjectId = state.subjects[0].id; n.unitId = null;
+      } else if (n.unitId && !findUnit(findSubject(n.subjectId), n.unitId)) n.unitId = null;
+      delete n.trashed;
+      save(); renderSide(); renderTrash();
+      toast('ノートを元に戻しました');
+      return;
+    }
+    const p = e.target.closest('[data-purge]');
+    if (p) {
+      const n = findNote(p.dataset.purge);
+      confirmAction('完全に削除', `「${n.title || '無題のノート'}」を完全に削除します。元に戻せません。`, '完全に削除する', () => {
+        state.notes = state.notes.filter((x) => x.id !== n.id);
+        save(); renderTrash();
+      });
+    }
+  });
 }
 
 // =========================================================
 // 科目・単元・ノートの操作
 // =========================================================
-let pending = null; // ダイアログで「OK」が押されたときにやること
-
-// ダイアログを開き、OK で閉じたら onOk を呼ぶ
-function openDialog(dialog, onOk) {
-  pending = onOk;
+// ダイアログを開き、押されたボタンの value を返す (×・Esc は '')
+function ask(dialog, focusEl) {
   dialog.returnValue = '';
   dialog.showModal();
-}
-// ダイアログが閉じたとき、OK なら予約しておいた処理を実行する (AI の確認画面は confirmAi が自分で扱う)
-document.querySelectorAll('dialog:not(#aiConfirm)').forEach((d) => {
-  d.addEventListener('close', () => {
-    const fn = pending;
-    pending = null;
-    if (d.returnValue === 'ok' && fn) fn();
+  focusEl?.focus();
+  return new Promise((resolve) => {
+    const watch = new AbortController();
+    const done = (v) => { watch.abort(); resolve(v); };
+    dialog.querySelector('form').addEventListener('submit', (e) => done(e.submitter?.value || ''), { signal: watch.signal });
+    dialog.addEventListener('close', () => done(dialog.returnValue || ''), { signal: watch.signal });
   });
-});
-// 「キャンセル」「×」は送信ボタンにしない (Enter で OK が押されるようにするため)
-document.querySelectorAll('dialog [data-close]').forEach((b) => {
-  b.addEventListener('click', () => b.closest('dialog').close('cancel'));
-});
-
-// 名前を入れるダイアログ (追加・名前変更で共用)
-function askName({ title, label, value = '', ok, placeholder = '' }, done) {
+}
+// 「キャンセル」「×」はどのダイアログでも閉じるだけ
+document.addEventListener('click', (e) => { const b = e.target.closest('dialog [data-close]'); if (b) b.closest('dialog').close(''); });
+async function askName({ title, label, value = '', ok }) {
+  const d = $('#nameDialog');
   $('#nameTitle').textContent = title;
   $('#nameLabel').textContent = label;
   $('#nameOk').textContent = ok;
   const input = $('#nameInput');
   input.value = value;
-  input.placeholder = placeholder;
-  openDialog($('#nameDialog'), () => {
-    const v = input.value.trim();
-    if (v) done(v);
-  });
+  const wait = ask(d, input);
   input.select();
+  const v = await wait;
+  return v === 'ok' ? input.value.trim() : null;
 }
-
-// 確認ダイアログ (削除など)
-function confirmAction(title, body, okLabel, done) {
+async function confirmAction(title, body, okLabel, done) {
   $('#confirmTitle').textContent = title;
   $('#confirmBody').textContent = body;
-  $('#confirmOk').textContent = okLabel;
-  openDialog($('#confirmDialog'), done);
+  const okBtn = $('#confirmOk');
+  okBtn.textContent = okLabel;
+  okBtn.className = 'btn btn-danger';
+  if (await ask($('#confirmDialog'), okBtn) === 'ok') done();
 }
 
-// 科目を追加する。then があれば追加後に呼ぶ
-function addSubject(then) {
-  askName({ title: '科目を追加', label: '科目名', ok: '追加する', placeholder: '例: 基本情報技術者' }, (name) => {
-    const s = { id: uid('s'), name, open: true, units: [] };
-    state.subjects.push(s);
-    state.sel = { subjectId: s.id, unitId: null };
-    save();
-    renderSidebar();
-    if (then) then(s);
-  });
-}
-
-// 科目に単元を追加する
-function addUnit(sid) {
-  const s = findSubject(sid);
-  if (!s) return;
-  askName({ title: `「${s.name}」に単元を追加`, label: '単元名', ok: '追加する', placeholder: '例: ネットワーク' }, (name) => {
-    s.units.push({ id: uid('u'), name, open: true });
-    s.open = true;
-    save();
-    renderSidebar();
-  });
-}
-
-// 新しいノートを作って開く。科目がなければ先に科目を作る
-function addNote(subjectId, unitId) {
-  if (!findSubject(subjectId)) {
-    addSubject((s) => addNote(s.id, null));
-    return;
-  }
-  const note = { id: uid('n'), subjectId, unitId: unitId || null, title: '', updated: today(), body: '' };
-  state.notes.unshift(note);
-  state.query = '';
-  $('#searchInput').value = '';
+async function addSubject() {
+  const name = await askName({ title: '科目を追加', label: '科目の名前', ok: '追加する' });
+  if (!name) return;
+  const s = { id: uid('s'), name, open: true, units: [] };
+  state.subjects.push(s);
   save();
-  selectNote(note.id);
-  setView('note');
-  $('#titleInput').focus();
+  sel.subjectId = s.id; sel.unitId = null;
+  addUnit(s.id);
 }
-
-// 科目・単元の名前を変更する
-function renameSubject(sid) {
+async function addUnit(sid) {
   const s = findSubject(sid);
-  if (!s) return;
-  askName({ title: '科目の名前を変更', label: '科目名', value: s.name, ok: '変更する' }, (name) => {
-    s.name = name; save(); renderSidebar(); renderNote();
-  });
+  const name = await askName({ title: `「${s.name}」に単元を追加`, label: '単元の名前（例：第1回 ER 図）', ok: '追加する' });
+  if (!name) { renderSide(); return; }
+  const u = { id: uid('u'), name };
+  s.units.push(u);
+  s.open = true;
+  save();
+  go(`#/unit/${s.id}/${u.id}`);
 }
-
-function renameUnit(sid, id) {
+async function renameSubject(sid) {
+  const s = findSubject(sid);
+  const name = await askName({ title: '科目の名前を変更', label: '科目の名前', value: s.name, ok: '変更する' });
+  if (!name) return;
+  s.name = name; save(); render();
+}
+async function renameUnit(sid, id) {
   const u = findUnit(findSubject(sid), id);
-  if (!u) return;
-  askName({ title: '単元の名前を変更', label: '単元名', value: u.name, ok: '変更する' }, (name) => {
-    u.name = name; save(); renderSidebar(); renderNote();
-  });
+  const name = await askName({ title: '単元の名前を変更', label: '単元の名前', value: u.name, ok: '変更する' });
+  if (!name) return;
+  u.name = name; save(); render();
 }
-
-// 削除のあと、開いていたノートや選んでいた科目が消えていたら別のものに切りかえる
-function afterRemoval() {
-  if (!currentNote()) state.noteId = state.notes[0]?.id ?? null;
-  if (!findSubject(state.sel.subjectId)) state.sel = { subjectId: state.subjects[0]?.id ?? null, unitId: null };
-  save();
-  selectNote(state.noteId);
-}
-
-// 科目を中の単元・ノートごと削除する
 function deleteSubject(sid) {
   const s = findSubject(sid);
-  if (!s) return;
-  const n = state.notes.filter((x) => x.subjectId === sid).length;
-  confirmAction('科目を削除',
-    `「${s.name}」と、中の単元${s.units.length}件・ノート${n}件を削除します。元に戻せません。`, '削除する', () => {
-      state.subjects = state.subjects.filter((x) => x !== s);
-      state.notes = state.notes.filter((x) => x.subjectId !== sid);
-      afterRemoval();
-    });
+  const count = live().filter((n) => n.subjectId === sid).length;
+  confirmAction('科目を削除', `「${s.name}」を削除します。${count ? `中のノート${count}件はゴミ箱へ移ります。` : ''}`, '削除する', () => {
+    const now = new Date().toISOString();
+    for (const n of live()) if (n.subjectId === sid) n.trashed = now;
+    state.subjects = state.subjects.filter((x) => x.id !== sid);
+    if (sel.subjectId === sid) { sel.subjectId = state.subjects[0]?.id ?? null; sel.unitId = null; }
+    save();
+    go('#/home');
+  });
 }
-
-// 単元を消しても、ノートは消さずに科目の直下へ移す
 function deleteUnit(sid, id) {
   const s = findSubject(sid);
   const u = findUnit(s, id);
-  if (!u) return;
-  const notes = notesIn(sid, id);
-  confirmAction('単元を削除',
-    notes.length
-      ? `「${u.name}」を削除します。中のノート${notes.length}件は消えずに「${s.name}」の直下へ移ります。`
-      : `「${u.name}」を削除します。`, '削除する', () => {
-      notes.forEach((n) => { n.unitId = null; });
-      s.units = s.units.filter((x) => x !== u);
-      if (state.sel.unitId === id) state.sel.unitId = null;
-      afterRemoval();
-    });
-}
-
-// ノートを削除する
-function deleteNote(id) {
-  const n = state.notes.find((x) => x.id === id);
-  if (!n) return;
-  confirmAction('ノートを削除', `「${n.title || '無題のノート'}」を削除します。元に戻せません。`, '削除する', () => {
-    state.notes = state.notes.filter((x) => x !== n);
-    afterRemoval();
+  confirmAction('単元を削除', `「${u.name}」を削除します。中のノートは消さずに「単元なし」へ移します。`, '削除する', () => {
+    for (const n of state.notes) if (n.subjectId === sid && n.unitId === id) n.unitId = null;
+    s.units = s.units.filter((x) => x.id !== id);
+    if (sel.unitId === id) sel.unitId = null;
+    save();
+    render();
   });
 }
-
-// ノートを別の科目・単元へ移す
+function addNote(subjectId, unitId, focus) {
+  let sid = findSubject(subjectId) ? subjectId : state.subjects[0]?.id;
+  if (!sid) {
+    const s = { id: uid('s'), name: 'はじめての科目', open: true, units: [] };
+    state.subjects.push(s);
+    sid = s.id;
+  }
+  const s = findSubject(sid);
+  const uidOk = unitId && findUnit(s, unitId) ? unitId : null;
+  const n = { id: uid('n'), subjectId: sid, unitId: uidOk, title: '', body: '', updated: today(), updatedAt: new Date().toISOString(), version: 1 };
+  state.notes.push(n);
+  s.open = true;
+  save();
+  focusTitleOnce = !!focus;
+  go(`#/note/${n.id}`);
+}
+function trashNote(id) {
+  const n = findNote(id);
+  cleanup?.(); cleanup = null;
+  n.trashed = new Date().toISOString();
+  save();
+  toast('ゴミ箱へ移動しました');
+  const next = notesIn(n.subjectId, n.unitId)[0];
+  go(next ? `#/note/${next.id}` : `#/unit/${n.subjectId}/${n.unitId ?? '_'}`);
+}
 function moveNoteTo(id, subjectId, unitId) {
-  const n = state.notes.find((x) => x.id === id);
-  if (!n || !findSubject(subjectId)) return;
-  if (n.subjectId === subjectId && (n.unitId || null) === (unitId || null)) return;
+  const n = findNote(id);
+  if (!n || (n.subjectId === subjectId && (n.unitId || null) === (unitId || null))) return;
+  cleanup?.(); cleanup = null;
   n.subjectId = subjectId;
   n.unitId = unitId || null;
-  openContainersOf(n);
-  if (n.id === state.noteId) state.sel = { subjectId, unitId: unitId || null };
-  touch(n);
-  renderSidebar();
-  renderNote();
-  toast(`「${n.title || '無題のノート'}」を ${pathOf(n).join(' › ')} へ移動しました`);
+  findSubject(subjectId).open = true;
+  save();
+  toast(`「${pathOf(n).join(' › ')}」へ移動しました`);
+  go(`#/note/${n.id}`);
+}
+async function openMove(id) {
+  const n = findNote(id);
+  const select = $('#moveSelect');
+  select.innerHTML = state.subjects.map((s) => `<optgroup label="${esc(s.name)}">
+    <option value="${s.id}|">${esc(s.name)}（単元なし）</option>
+    ${s.units.map((u) => `<option value="${s.id}|${u.id}">${esc(u.name)}</option>`).join('')}</optgroup>`).join('');
+  select.value = `${n.subjectId}|${n.unitId ?? ''}`;
+  $('#moveNoteName').textContent = `「${n.title || '無題のノート'}」の移動先を選んでください`;
+  if (await ask($('#moveDialog'), select) !== 'ok') return;
+  const [sid, uId] = select.value.split('|');
+  moveNoteTo(id, sid, uId || null);
 }
 
-// 「移動」ダイアログを開く (行き先を科目・単元のリストから選ぶ)
-function openMove(id) {
-  const n = state.notes.find((x) => x.id === id);
-  if (!n) return;
-  $('#moveNoteName').textContent = `「${n.title || '無題のノート'}」 いまの場所: ${pathOf(n).join(' › ')}`;
-  const cur = `${n.subjectId}|${n.unitId || ''}`;
-  $('#moveSelect').innerHTML = state.subjects.map((s) => `
-    <optgroup label="${esc(s.name)}">
-      <option value="${s.id}|" ${cur === `${s.id}|` ? 'selected' : ''}>${esc(s.name)} (直下)</option>
-      ${s.units.map((u) => `<option value="${s.id}|${u.id}" ${cur === `${s.id}|${u.id}` ? 'selected' : ''}>${esc(s.name)} › ${esc(u.name)}</option>`).join('')}
-    </optgroup>`).join('');
-  openDialog($('#moveDialog'), () => {
-    const [sid, unit] = $('#moveSelect').value.split('|');
-    moveNoteTo(id, sid, unit);
-  });
-}
-
-// ---------- 「…」メニュー ----------
-const menu = $('#ctxMenu');
-let menuItems = [];
+// =========================================================
+// 「…」メニュー
+// =========================================================
+const menu = $('#menu');
 let menuOwner = null;
-
-// 科目・単元・ノートの種類に合わせたメニューを、ボタンの近くに開く
-function openMenu(btn) {
-  const { kind, id, sid } = btn.dataset;
-  if (kind === 'subject') {
-    menuItems = [
-      { label: '単元を追加', icon: 'unit', run: () => addUnit(id) },
-      { label: 'ノートを追加', icon: 'note', run: () => addNote(id, null) },
-      '-',
-      { label: '名前を変更', icon: 'summary', run: () => renameSubject(id) },
-      { label: '削除…', icon: 'close', run: () => deleteSubject(id) },
-    ];
-  } else if (kind === 'unit') {
-    menuItems = [
-      { label: 'ノートを追加', icon: 'note', run: () => addNote(sid, id) },
-      '-',
-      { label: '名前を変更', icon: 'summary', run: () => renameUnit(sid, id) },
-      { label: '削除…', icon: 'close', run: () => deleteUnit(sid, id) },
-    ];
-  } else {
-    menuItems = [
-      { label: '開く', icon: 'note', run: () => { selectNote(id); setView('note'); } },
-      { label: '別の科目・単元へ移動…', icon: 'folder', run: () => openMove(id) },
-      '-',
-      { label: '削除…', icon: 'close', run: () => deleteNote(id) },
-    ];
+function openMenu(btn, items) {
+  if (menuOwner === btn) { closeMenu(true); return; }
+  closeMenu();
+  menu.innerHTML = '';
+  const actions = [];
+  for (const it of items) {
+    if (!it) { menu.append(document.createElement('hr')); continue; }
+    const [ic, label, act, cls] = it;
+    if (!act) { const p = document.createElement('p'); p.className = 'menu-text'; p.textContent = label; menu.append(p); continue; }
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    if (cls) b.className = cls;
+    b.innerHTML = `${ic ? icon(ic) : ''}<span>${esc(label)}</span>`;
+    b.addEventListener('click', () => { closeMenu(); act(); });
+    menu.append(b);
+    actions.push(b);
   }
-  menu.innerHTML = menuItems.map((it, i) => it === '-' ? '<hr>' : `<button type="button" role="menuitem" data-i="${i}">${icon(it.icon)}${it.label}</button>`).join('');
   menu.hidden = false;
-  // 画面からはみ出さない位置に出す (下に入らなければ上に出す)
   const r = btn.getBoundingClientRect();
-  const left = Math.min(r.left, innerWidth - menu.offsetWidth - 8);
-  let top = r.bottom + 4;
-  if (top + menu.offsetHeight > innerHeight - 8) top = Math.max(8, r.top - menu.offsetHeight - 4);
-  menu.style.left = `${Math.max(8, left)}px`;
-  menu.style.top = `${top}px`;
-  menuOwner = btn;
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  menu.style.left = `${Math.max(8, Math.min(r.right - w, innerWidth - w - 8))}px`;
+  menu.style.top = `${r.bottom + h + 6 > innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6}px`;
   btn.setAttribute('aria-expanded', 'true');
-  menu.querySelector('button').focus();
+  menuOwner = btn;
+  actions[0]?.focus();
 }
-
-// メニューを閉じる。refocus なら元のボタンにフォーカスを戻す
 function closeMenu(refocus) {
   if (menu.hidden) return;
   menu.hidden = true;
-  if (menuOwner) {
-    menuOwner.setAttribute('aria-expanded', 'false');
-    if (refocus && menuOwner.isConnected) menuOwner.focus();
-  }
+  menuOwner?.setAttribute('aria-expanded', 'false');
+  if (refocus) menuOwner?.focus();
   menuOwner = null;
 }
-
-// メニューの項目を押したら実行する
-menu.addEventListener('click', (e) => {
-  const b = e.target.closest('[data-i]');
-  if (!b) return;
-  const item = menuItems[Number(b.dataset.i)];
-  closeMenu(false);
-  item.run();
-});
-// 上下キーで項目を移動する
-menu.addEventListener('keydown', (e) => {
-  const items = [...menu.querySelectorAll('button')];
-  const i = items.indexOf(document.activeElement);
-  if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); }
-  if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
-});
-// メニューの外を押す・Esc・画面サイズの変更・スクロールで閉じる
-document.addEventListener('pointerdown', (e) => {
-  if (!menu.hidden && !menu.contains(e.target) && !e.target.closest('[data-act="menu"]')) closeMenu(false);
-});
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(true); });
-window.addEventListener('resize', () => closeMenu(false));
-$('.panel').addEventListener('scroll', () => closeMenu(false));
-
-// ---------- ツリーのクリック / 右クリック ----------
-// data-act で「開く / 開閉 / メニュー / 科目追加」を振り分ける
-$('#tree').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-act]');
-  if (!b) return;
-  const { act, kind, id, sid } = b.dataset;
-  if (act === 'open') {
-    selectNote(id);
-    setView('note');
-  } else if (act === 'toggle') {
-    const target = kind === 'subject' ? findSubject(id) : findUnit(findSubject(sid), id);
-    if (!target) return;
-    target.open = !target.open;
-    state.sel = { subjectId: kind === 'subject' ? id : sid, unitId: kind === 'unit' ? id : null };
-    save();
-    renderSidebar();
-    $(`#tree [data-act="toggle"][data-id="${id}"]`)?.focus();
-  } else if (act === 'menu') {
-    if (menuOwner === b) closeMenu(false); else { closeMenu(false); openMenu(b); }
-  } else if (act === 'add-subject') {
-    addSubject();
+document.addEventListener('click', (e) => { if (!menu.hidden && !e.target.closest('#menu') && !menuOwner?.contains(e.target)) closeMenu(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !menu.hidden) closeMenu(true);
+  if (!menu.hidden && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    const items = [...menu.querySelectorAll('button')];
+    const i = items.indexOf(document.activeElement);
+    items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+    e.preventDefault();
   }
-});
-// 右クリックでも「…」メニューを開く
-$('#tree').addEventListener('contextmenu', (e) => {
-  const more = e.target.closest('.row')?.querySelector('[data-act="menu"]');
-  if (!more) return;
-  e.preventDefault();
-  closeMenu(false);
-  openMenu(more);
-});
-
-// ---------- ドラッグで移動 (PC) ----------
-let dragId = null;
-const clearDrop = () => document.querySelectorAll('.drop-over').forEach((el) => el.classList.remove('drop-over'));
-// ノートの行をつかんだら、その ID を覚える
-$('#tree').addEventListener('dragstart', (e) => {
-  const row = e.target.closest('[data-note]');
-  if (!row) return;
-  dragId = row.dataset.note;
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', dragId);
-  closeMenu(false);
-});
-// 落とせる行 (科目・単元・ノート) の上にいる間は枠を光らせる
-$('#tree').addEventListener('dragover', (e) => {
-  const row = e.target.closest('[data-drop]');
-  if (!row || !dragId) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-  if (!row.classList.contains('drop-over')) { clearDrop(); row.classList.add('drop-over'); }
-});
-$('#tree').addEventListener('dragleave', (e) => {
-  const row = e.target.closest('[data-drop]');
-  if (row && !row.contains(e.relatedTarget)) row.classList.remove('drop-over');
-});
-// 落とした行の科目・単元へノートを移す
-$('#tree').addEventListener('drop', (e) => {
-  const row = e.target.closest('[data-drop]');
-  if (!row || !dragId) return;
-  e.preventDefault();
-  const [sid, unit] = row.dataset.drop.split('|');
-  const id = dragId;
-  dragId = null;
-  clearDrop();
-  moveNoteTo(id, sid, unit);
-});
-$('#tree').addEventListener('dragend', () => { dragId = null; clearDrop(); });
-
-// 「科目を追加」ボタンと、パンくず (場所) からの移動
-$('#addSubjectBtn').addEventListener('click', () => addSubject());
-$('#crumbs').addEventListener('click', (e) => {
-  if (e.target.closest('#moveBtn') && state.noteId) openMove(state.noteId);
 });
 
 // =========================================================
-// 右: 復習
+// 写真から取り込み
 // =========================================================
-// テスト / 説明チェック のどちらのボタンが押されているかを表示する
-function setAiActive(which) {
-  $('#quizBtn').setAttribute('aria-pressed', which === 'quiz');
-  $('#explainBtn').setAttribute('aria-pressed', which === 'explain');
-}
-
-// 右パネルを空の状態に戻す
-function resetAiPanel() {
-  setAiActive(null);
-  $('#aiPanel').innerHTML = '<p class="ai-empty">テストか説明チェックが<br>ここに表示されます</p>';
-}
-
-function aiMessage(text) {
-  $('#aiPanel').innerHTML = `<p class="ai-empty">${text}</p>`;
-}
-
-// ---------- 理解度テスト ----------
-// テストは、ノート1つにつき15問を1回だけ作って取っておく。
-// 5問・10問はその中から選ぶので、問題数を変えても待たない。本文を書きかえたら作り直す。
-const QUIZ_POOL = 15;
-const quizCache = new Map(); // ノートの id → { body, promise }
-let quizRun = 0; // showQuiz を呼ぶたびに増やす。古い呼び出しが後から画面を書きかえないため
-
-// テスト (15問) を作り始める。作り中・作り済みなら同じものを返す。
-// 結果は { questions, isDemo, message }。失敗したら AiError で終わる (そのときは覚えておかない)
-function aiQuiz(note) {
-  const body = note.body || '';
-  const hit = quizCache.get(note.id);
-  if (hit && hit.body === body) return hit.promise;
-  const entry = { body };
-  entry.promise = ai.generate({ feature: 'quiz', input: body, options: { count: QUIZ_POOL } }).then((r) => {
-    const questions = validQuiz(r.data.questions);
-    if (!questions && !r.data.message) throw new ai.AiError('unknown', 'bad_output');
-    return { questions, isDemo: r.isDemo, message: r.data.message };
-  });
-  entry.promise.catch(() => { if (quizCache.get(note.id) === entry) quizCache.delete(note.id); });
-  quizCache.set(note.id, entry);
-  return entry.promise;
-}
-
-// このノートのテストを作り済み・作り中か (それなら AI をもう一度呼ばないので、確認もいらない)
-function quizStored(note) {
-  const hit = quizCache.get(note.id);
-  return !!hit && hit.body === (note.body || '');
-}
-
-// 問題の束から count 問を選び、選択肢の並びも毎回変える
-const pickQuestions = (pool, count) =>
-  shuffle(pool).slice(0, count).map((q) => ({ ...q, choices: shuffle(q.choices) }));
-
-// 理解度テストを表示する。新しく作るときは確認画面を出し、作っている間は「考え中」と経過秒数を出す
-async function showQuiz(count = 5) {
-  const note = currentNote();
-  if (!note) return;
-  if (!(note.body || '').trim()) { setAiActive('quiz'); aiMessage('ノートに内容を書くと、テストを作れます'); return; }
-  if (!quizStored(note) && !(await confirmAi('quiz'))) return; // キャンセルなら今の画面のまま
-  if (note !== currentNote()) return;
-  setAiActive('quiz');
-  const panel = $('#aiPanel');
-  const run = ++quizRun;
-
-  const t0 = Date.now();
-  const label = showThinking(panel, '考え中… 問題を作っています');
-  const timer = setInterval(() => { label.textContent = `考え中… 問題を作っています (${Math.round((Date.now() - t0) / 1000)}秒)`; }, 1000);
-  // 待つ間に別のノート・別の画面へ移っていたら、何もしない
-  const stale = () => run !== quizRun || note !== currentNote() || !panel.contains(label);
-  let result;
-  try {
-    result = await aiQuiz(note);
-  } catch (e) {
-    if (!stale()) aiMessage(esc(aiErrorText(e)));
-    return;
-  } finally {
-    clearInterval(timer);
-  }
-  if (stale()) return;
-  if (!result.questions) { aiMessage(esc(result.message)); return; }
-  renderQuiz(note, pickQuestions(result.questions, count), count, result.isDemo);
-}
-
-// テストを画面に描く。isDemo ならデモ表記を付ける
-function renderQuiz(note, questions, count, isDemo) {
-  const panel = $('#aiPanel');
-  panel.innerHTML = `
-    <div class="ai-head">
-      <h3>理解度テスト</h3>
-      <span class="hint">${esc(note.title || '無題のノート')}</span>
-    </div>
-    <div class="slider">
-      <div class="slider-head"><span>問題数</span><b id="quizCountLabel">${count}問</b></div>
-      <input type="range" id="quizCount" min="5" max="15" step="5" value="${count}" aria-label="問題数">
-    </div>
-    ${questions.map((q, i) => `
-      <div class="q" data-q="${i}">
-        <p class="q-text"><span class="q-num">${String(i + 1).padStart(2, '0')}</span>${esc(q.text)}</p>
-        <div class="choices">
-          ${q.choices.map((c, j) => `<button type="button" class="choice" data-c="${j}"><span class="kana">${'アイウエ'[j]}</span><span class="ctext">${esc(c)}</span></button>`).join('')}
-        </div>
-      </div>`).join('')}
-    <div class="score"><span id="scoreText">残り ${questions.length}問</span>
-      <button type="button" class="btn" id="quizRetry">もう一度</button></div>`;
-  if (isDemo) panel.querySelector('.ai-head').after(demoBadge());
-
-  // 選択肢を押したら正解・不正解を色で見せ、点数を数える
-  let answered = 0, correct = 0;
-  panel.querySelectorAll('.q').forEach((el) => {
-    const q = questions[Number(el.dataset.q)];
-    const isAnswer = (b) => q.choices[Number(b.dataset.c)] === q.answer;
-    el.querySelectorAll('.choice').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const right = isAnswer(btn);
-        el.querySelectorAll('.choice').forEach((b) => {
-          b.disabled = true;
-          if (isAnswer(b)) b.classList.add('correct');
-        });
-        if (!right) btn.classList.add('wrong');
-        answered++;
-        if (right) correct++;
-        const done = answered === questions.length;
-        const score = $('#scoreText');
-        score.classList.toggle('done', done);
-        score.textContent = done
-          ? `${correct} / ${questions.length}`
-          : `残り ${questions.length - answered}問`;
-      });
-    });
-  });
-  // 問題数を変えた・もう一度: 作り置きから選び直す (AI をもう一度呼ぶのは本文が変わったときだけ)
-  $('#quizCount').addEventListener('input', (e) => { $('#quizCountLabel').textContent = `${e.target.value}問`; });
-  $('#quizCount').addEventListener('change', (e) => showQuiz(Number(e.target.value)));
-  $('#quizRetry').addEventListener('click', () => showQuiz(count));
-}
-
-// 「自分の言葉で説明する」画面。書いた説明を AI が採点する
-function showExplain() {
-  const note = currentNote();
-  if (!note) return;
-  setAiActive('explain');
-  const terms = parseTerms(note.body);
-  if (!terms.length) {
-    aiMessage('ノートに用語がまだありません。<br><code>- **用語**: 説明</code> の形で書いてみてください');
-    return;
-  }
-  const panel = $('#aiPanel');
-  panel.innerHTML = `
-    <div class="ai-head"><h3>自分の言葉で説明する</h3></div>
-    <label class="field"><span>説明する用語</span>
-      <select id="exTerm">${terms.map((t, i) => `<option value="${i}">${esc(t.term)}</option>`).join('')}</select>
-    </label>
-    <label class="field"><span>ノートを見ずに説明してみよう</span>
-      <textarea id="exText" placeholder="友だちに教えるつもりで書いてみましょう"></textarea>
-    </label>
-    <button type="button" class="btn btn-primary" id="exCheck">チェックする</button>
-    <div id="exResult"></div>`;
-
-  $('#exTerm').addEventListener('change', () => { $('#exResult').innerHTML = ''; });
-  $('#exCheck').addEventListener('click', async () => {
-    const answer = $('#exText').value.trim();
-    const result = $('#exResult');
-    if (!answer) { result.innerHTML = '<p class="hint">まず説明を書いてみてください</p>'; return; }
-    if (!(await confirmAi('check'))) return;
-    showThinking(result, '考え中… 説明を読んでいます');
-    const term = terms[Number($('#exTerm').value)];
-    let r;
-    try {
-      r = await ai.generate({ feature: 'check', input: { term: term.term, desc: term.desc, answer } });
-    } catch (e) {
-      result.innerHTML = `<p class="hint">${esc(aiErrorText(e))}</p>`;
-      return;
-    }
-    const d = { score: Number(r.data.score) || 0, hit: r.data.hit || [], miss: r.data.miss || [] };
-    // 点数で3段階の評価にする
-    const stamp = d.score >= 80 ? 'よくできました' : d.score >= 40 ? 'もうすこし' : '見直そう';
-    const words = (items, cls) => `<p class="words ${cls}">${items.map(esc).join('・')}</p>`;
-    result.innerHTML = `
-      <div class="feedback">
-        <div class="verdict"><div class="stamp">${stamp}</div><div class="ex-comment"></div></div>
-        ${d.hit.length ? `<div><span class="hint">入っていた言葉</span>${words(d.hit, 'ok')}</div>` : ''}
-        ${d.miss.length ? `<div><span class="hint">抜けていた言葉</span>${words(d.miss, 'ng')}</div>` : ''}
-        <div><span class="hint">ノートの説明</span><p class="model">${esc(term.desc)}</p></div>
-      </div>`;
-    // ひとことはタイピング表示。終わったらデモ表記 (デモのとき)
-    await streamInto(result.querySelector('.ex-comment'), ai.streamText(r.text), { isDemo: r.isDemo });
-  });
-}
-
-// 右パネルをたたむ / 開く (PC)
-$('#aiMin').addEventListener('click', () => { document.body.classList.add('ai-collapsed'); $('#aiOpen').focus(); });
-$('#aiOpen').addEventListener('click', () => { hideBubble(true); document.body.classList.remove('ai-collapsed'); $('#aiMin').focus(); });
-
-// 「AI」ボタンのふきだし: 画面を開いたときに約10秒だけ出す。ボタンにマウスやフォーカスが来たらまた出す
-const bubble = $('#aiBubble');
-let bubbleTimer = null;
-function showBubble(ms) {
-  clearTimeout(bubbleTimer);
-  bubble.classList.remove('leaving');
-  bubble.hidden = false;
-  if (ms) bubbleTimer = setTimeout(() => hideBubble(), ms);
-}
-function hideBubble(now = false) {
-  clearTimeout(bubbleTimer);
-  if (bubble.hidden) return;
-  if (now) { bubble.hidden = true; return; }
-  bubble.classList.add('leaving');
-  bubbleTimer = setTimeout(() => { bubble.hidden = true; bubble.classList.remove('leaving'); }, 300);
-}
-['pointerenter', 'focus'].forEach((ev) => $('#aiOpen').addEventListener(ev, () => showBubble()));
-['pointerleave', 'blur'].forEach((ev) => $('#aiOpen').addEventListener(ev, () => hideBubble()));
-setTimeout(() => showBubble(10000), 600);
-
-// =========================================================
-// アカウント
-// - Supabase の設定があるとき: 未ログインなら「ログイン」、ログイン中なら「ログアウト」ボタン
-// - 設定が無いとき: これまでどおりの仮登録 (アカウント名をこの端末に保存するだけ)
-// =========================================================
-// アカウントの表示 (名前・アイコン・ボタン) を更新する
-function renderAccount() {
-  if (cloud.enabled) {
-    const name = (state.name || cloud.user?.email || '').trim();
-    $('#avatar').textContent = cloud.user ? name[0] || '' : '';
-    $('#avatar').classList.toggle('empty', !cloud.user);
-    $('#accountName').textContent = name;
-    $('#accountName').hidden = !cloud.user;
-    $('#accountRole').textContent = cloud.user ? 'ログイン中' : 'ゲスト';
-    $('#registerBtn').textContent = cloud.user ? 'ログアウト' : 'ログイン';
-    $('#registerBtn').hidden = false;
-    return;
-  }
-  const name = (state.name || '').trim();
-  $('#avatar').textContent = name[0] || '';
-  $('#avatar').classList.toggle('empty', !name);
-  $('#accountName').textContent = name;
-  $('#accountName').hidden = !name;
-  $('#accountRole').textContent = name ? '学生' : 'ゲスト';
-  $('#registerBtn').hidden = !!name;
-}
-renderAccount();
-
-// Supabase とのやり取りがうまくいかなかったときのお知らせ
-if (cloud.merged) toast('ログイン前にこの端末で書いたノートを、クラウドのノートに追加しました');
-if (cloudStatus === 'offline') toast('クラウドのノートを読み込めませんでした。この端末の内容を表示しています（クラウドには保存されません）');
-addEventListener('cloud-save-error', () => toast('クラウドに保存できませんでした。この端末には保存されています'));
-
-// ボタン: ログイン画面へ / ログアウト / (設定が無いときは) 名前を入れてこの端末に保存する
-$('#registerBtn').addEventListener('click', async () => {
-  if (cloud.enabled) {
-    if (cloud.user) await cloud.signOut(STORAGE_KEY); // 送り残しを送ってから出る
-    location.href = 'login.html';
-    return;
-  }
-  $('#accountInput').value = '';
-  openDialog($('#accountDialog'), () => {
-    const name = $('#accountInput').value.trim();
-    if (!name) return;
-    state.name = name;
-    save();
-    renderAccount();
-  });
-});
-
-// スマホ幅では 科目 / ノート / 復習 を1画面ずつ見せる (PC幅では3つとも出ているので見た目は変わらない)
-function setView(view) {
-  document.body.dataset.view = view;
-  document.querySelectorAll('.tabbar [data-view]').forEach((b) => {
-    b.setAttribute('aria-current', b.dataset.view === view);
-  });
-}
-document.querySelectorAll('.tabbar [data-view]').forEach((b) => {
-  b.addEventListener('click', () => setView(b.dataset.view));
-});
-setView('note');
-
-// 「新しいノート」: いま選んでいる科目・単元に作る
-$('#newNoteBtn').addEventListener('click', () => addNote(state.sel.subjectId, state.sel.unitId));
-
-// タイトルを変えたらすぐ保存し、ツリーの名前も更新する
-$('#titleInput').addEventListener('input', (e) => {
-  const note = currentNote();
-  if (!note) return;
-  note.title = e.target.value;
-  touch(note);
-  renderSidebar();
-});
-
-
-// 検索: ツリーを結果一覧にし、本文の一致も光らせる
-$('#searchInput').addEventListener('input', (e) => {
-  state.query = e.target.value;
-  renderSidebar();
-  renderPreview();
-});
-
-// 要点まとめ: もう一度押すと閉じる。考え中 → タイピング表示 → デモ表記
-$('#summaryBtn').addEventListener('click', async () => {
-  const note = currentNote();
-  if (!note) return;
-  const box = $('#summaryBox');
-  if (!box.hidden) { box.hidden = true; $('#summaryBtn').setAttribute('aria-pressed', false); return; }
-  const out = $('#summaryBody');
-  const open = () => { box.hidden = false; $('#summaryBtn').setAttribute('aria-pressed', true); setView('note'); };
-  if (!(note.body || '').trim()) { open(); out.innerHTML = '<p class="hint">まとめられる内容がまだありません</p>'; return; }
-  // 確認画面で「まとめる」を押したときだけ、要点の枠を開いて AI を使う
-  if (!(await confirmAi('summary')) || note !== currentNote()) return;
-  open();
-  showThinking(out, '考え中… まとめています');
-  try {
-    await streamInto(out, ai.generateStream({ feature: 'summary', input: note.body }), { isDemo: ai.isDemo });
-  } catch (e) {
-    out.innerHTML = `<p class="hint">${esc(aiErrorText(e))}</p>`;
-  }
-});
-$('#summaryClose').addEventListener('click', () => { $('#summaryBox').hidden = true; $('#summaryBtn').setAttribute('aria-pressed', false); });
-
-// テスト・説明チェックのボタン
-$('#quizBtn').addEventListener('click', () => showQuiz());
-$('#explainBtn').addEventListener('click', showExplain);
-
-// 写真取り込み
+let photoNote = null;
 let extracted = [];
-// ダイアログを開くときに前回の結果を消しておく
-$('#photoBtn').addEventListener('click', () => {
-  if (!currentNote()) return;
+function openPhoto(note) {
+  photoNote = note;
   $('#photoInput').value = '';
   $('#photoPreview').hidden = true;
   $('#dropText').hidden = false;
   $('#dropText').textContent = '手書きノートの写真を撮る / 選ぶ';
   $('#photoResult').hidden = true;
   $('#photoAdd').disabled = true;
-  openDialog($('#photoDialog'), null);
-});
-
-// 写真を JPEG の base64 にする。手書きの細い線をつぶさないよう、長い辺 2560px・高画質で送る。
-// サーバーの上限 (base64 で 300万文字) を超えるときだけ、画質を少しずつ下げる
+  ask($('#photoDialog'));
+}
 const PHOTO_MAX_CHARS = 2_900_000;
 async function shrinkPhoto(file, max = 2560) {
-  // スマホ写真の向き (EXIF) を反映して読み込む
   const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
   const k = Math.min(1, max / Math.max(bmp.width, bmp.height));
   const canvas = document.createElement('canvas');
@@ -1217,10 +1098,8 @@ async function shrinkPhoto(file, max = 2560) {
     const data = canvas.toDataURL('image/jpeg', q).split(',')[1];
     if (data.length <= PHOTO_MAX_CHARS) return data;
   }
-  return shrinkPhoto(file, Math.round(max * 0.75)); // それでも大きければ、ひと回り小さくする
+  return shrinkPhoto(file, Math.round(max * 0.75));
 }
-
-// 読み取れなかったときの理由 (サーバーが返す細かい理由ごと。無ければ ERROR_MESSAGES を使う)
 const PHOTO_ERRORS = {
   timeout: '読み取りに時間がかかりすぎました。もう一度選ぶか、写真を明るく撮り直してください',
   unavailable: 'AIが混み合っています。少し時間をおいてから、もう一度選んでください',
@@ -1228,404 +1107,115 @@ const PHOTO_ERRORS = {
   bad_image: 'この写真の形式は読めません。JPEG / PNG の写真を選んでください',
   no_key: 'AIの設定 (APIキー) がありません',
 };
-
-// 写真を選んだら単語を読み取る。精度優先なので1〜2分かかることがある
 $('#photoInput').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
   const img = $('#photoPreview');
+  const text = $('#dropText');
   img.src = URL.createObjectURL(file);
   img.hidden = false;
   $('#photoResult').hidden = true;
   $('#photoAdd').disabled = true;
-  const text = $('#dropText');
   text.hidden = false;
   text.textContent = '写真を確認してください';
-  if (!(await confirmAi('photo'))) {
-    // 読み取らない。同じ写真をもう一度選べるようにしておく
-    e.target.value = '';
-    img.hidden = true;
-    text.textContent = '手書きノートの写真を撮る / 選ぶ';
-    return;
-  }
-  // 待っている秒数を見せる
+  const photoDialog = $('#photoDialog');
+  photoDialog.close();
+  const yes = await confirmAi('photo');
+  photoDialog.showModal();
+  if (!yes) { e.target.value = ''; img.hidden = true; text.textContent = '手書きノートの写真を撮る / 選ぶ'; return; }
   const t0 = Date.now();
-  const tick = () => { text.textContent = `考え中… 単語を読み取っています ${Math.round((Date.now() - t0) / 1000)}秒 (精度優先のため1〜2分かかることがあります)`; };
+  const tick = () => { text.textContent = `考え中… 用語を読み取っています ${Math.round((Date.now() - t0) / 1000)}秒`; };
   tick();
   const timer = setInterval(tick, 1000);
   let r = null, failure = null;
   try {
     let image;
-    try {
-      image = await shrinkPhoto(file);
-    } catch {
-      throw new ai.AiError('unknown', 'bad_image'); // ブラウザで開けない画像形式 (HEIC など)
-    }
+    try { image = await shrinkPhoto(file); } catch { throw new ai.AiError('unknown', 'bad_image'); }
     r = await ai.generate({ feature: 'photo', input: { image, mime: 'image/jpeg' } });
-  } catch (err) {
-    failure = err;
-  } finally {
-    clearInterval(timer);
-  }
-  if (e.target.files[0] !== file) return; // 待つ間に別の写真が選ばれた
-  if (failure) {
-    text.textContent = PHOTO_ERRORS[failure.code] || aiErrorText(failure);
-    return;
-  }
-  if (r.data.message) { text.textContent = r.data.message; return; } // デモでサンプルが無いとき
-  const words = (Array.isArray(r.data.words) ? r.data.words : [])
-    .filter((w) => w?.term && w?.desc).map((w) => ({ term: String(w.term), desc: String(w.desc) }));
-  extracted = words;
-  if (!words.length) {
-    text.textContent = '用語が見つかりませんでした。明るい場所で、ノートが画面いっぱいになるように撮り直してください';
-    return;
-  }
-  $('#dropText').hidden = true;
-  $('#wordList').innerHTML = extracted.map((w, i) => `
-    <li><label><input type="checkbox" value="${i}" checked>
-      <span><strong>${esc(w.term)}</strong> <small>${esc(w.desc)}</small></span></label></li>`).join('');
-  addDemoBadge($('#photoResult'), r.isDemo);
+  } catch (err) { failure = err; } finally { clearInterval(timer); }
+  if (e.target.files[0] !== file) return;
+  if (failure) { text.textContent = PHOTO_ERRORS[failure.code] || aiErrorText(failure); return; }
+  if (r.data.message) { text.textContent = r.data.message; return; }
+  extracted = (Array.isArray(r.data.words) ? r.data.words : []).filter((w) => w?.term && w?.desc).map((w) => ({ term: String(w.term), desc: String(w.desc) }));
+  if (!extracted.length) { text.textContent = '用語が見つかりませんでした。明るい場所で、ノートが画面いっぱいになるように撮り直してください'; return; }
+  text.hidden = true;
+  $('#wordList').innerHTML = extracted.map((w, i) => `<li><label><input type="checkbox" value="${i}" checked>
+    <span><strong>${esc(w.term)}</strong> <small>${esc(w.desc)}</small></span></label></li>`).join('');
   $('#photoResult').hidden = false;
   $('#photoAdd').disabled = false;
 });
-
-// チェックした単語を本文の最後に追加する
 $('#photoAdd').addEventListener('click', () => {
-  const note = currentNote();
   const picked = [...document.querySelectorAll('#wordList input:checked')].map((c) => extracted[Number(c.value)]);
-  if (note && picked.length) {
-    unmark(editor);
-    editor.insertAdjacentHTML('beforeend',
-      `<h2>写真から取り込み</h2><ul>${picked.map((w) => `<li><strong>${esc(w.term)}</strong>: ${esc(w.desc)}</li>`).join('')}</ul>`);
-    saveEditor();
-    renderSidebar();
-    renderNote();
-  }
+  const note = photoNote;
   $('#photoDialog').close();
+  if (!note || !picked.length) return;
+  cleanup?.(); cleanup = null;
+  note.body = `${note.body.replace(/\s+$/, '')}\n\n## 写真から取り込み\n${picked.map((w) => `- **${w.term}**: ${w.desc}`).join('\n')}\n`.replace(/^\n+/, '');
+  note.updated = today();
+  note.updatedAt = new Date().toISOString();
+  note.version = (note.version || 1) + 1;
+  save();
+  render();
+  toast(`${picked.length}件の用語を追加しました`);
 });
 
 // =========================================================
-// 本文の入力
+// 同時編集の競合 (別の端末が先に保存していた)
 // =========================================================
-// Enter で改行したとき <p> で区切る
-document.execCommand('defaultParagraphSeparator', false, 'p');
-// 入力のたびに保存する
-editor.addEventListener('input', () => { convertFonts(); saveEditor(); });
-// 貼り付けは文字だけにする (よそのページの書式やスクリプトを持ち込まない)
-editor.addEventListener('paste', (e) => {
-  e.preventDefault();
-  document.execCommand('insertText', false, e.clipboardData.getData('text/plain'));
-});
-// チェックリストの□を押すと、済/未済を切り替える
-editor.addEventListener('click', (e) => {
-  const li = e.target.closest('ul.checklist > li');
-  if (!li || e.clientX - li.getBoundingClientRect().left > 24) return;
-  li.classList.toggle('done');
-  saveEditor();
-});
-
-// =========================================================
-// ツールボックス
-// =========================================================
-const toolbar = $('#toolbar');
-const pop = $('#pop');
-// 文字色・背景色・文字の大きさの候補と、いま選んでいる値
-const FORE = [['黒', '#1b2233'], ['赤', '#e5484d'], ['オレンジ', '#f08c00'], ['緑', '#2f9e44'], ['青', '#1f6bff'], ['紫', '#9c36b5'], ['グレー', '#868e96'], ['水色', '#1098ad'], ['茶', '#8d5a2b']];
-const BACK = [['黄', '#fff3a3'], ['緑', '#d3f9d8'], ['青', '#d0ebff'], ['ピンク', '#ffdeeb'], ['紫', '#e5dbff'], ['オレンジ', '#ffe8cc'], ['グレー', '#e9ecef'], ['水色', '#c5f6fa']];
-const SIZES = [['小', '13px'], ['標準', '15px'], ['大', '19px'], ['特大', '24px']];
-const tools = { fore: '#e5484d', back: '#fff3a3', size: null, painter: null };
-$('#foreBar').style.setProperty('--c', tools.fore);
-$('#hiliteBar').style.setProperty('--c', tools.back);
-
-// 本文の中で選んでいる範囲を覚えておく (ツールボックスを押すとフォーカスが外れるため)
-let savedRange = null;
-document.addEventListener('selectionchange', () => {
-  const sel = getSelection();
-  if (sel.rangeCount && editor.contains(sel.anchorNode)) {
-    savedRange = sel.getRangeAt(0).cloneRange();
-    updateToolState();
+function diffLines(a, b) {
+  // b にしか無い行を「追加」、a にしか無い行を「削除」として色を付ける (簡易)
+  const as = new Set(a.split('\n')), bs = new Set(b.split('\n'));
+  const out = b.split('\n').map((l) => (as.has(l) ? esc(l) : `<span class="add">${esc(l)}</span>`));
+  for (const l of a.split('\n')) if (l.trim() && !bs.has(l)) out.push(`<span class="del">${esc(l)}</span>`);
+  return out.join('\n');
+}
+addEventListener('cloud-conflict', async (e) => {
+  const { remote, at } = e.detail;
+  cleanup?.(); // 編集中の内容をいったん確定してから比べる
+  const r = parseRoute();
+  const mineNote = r.id ? findNote(r.id) : null;
+  const theirsNote = mineNote ? remote.notes?.find((n) => n.id === mineNote.id) : null;
+  const mine = mineNote ? `${mineNote.title}\n${mineNote.body}` : `${state.notes.length}件のノート`;
+  const theirs = theirsNote ? `${theirsNote.title}\n${theirsNote.body}` : `${remote.notes?.length ?? 0}件のノート`;
+  $('#mineHead').textContent = 'この端末 · 編集中';
+  $('#theirsHead').textContent = `ほかの端末 · ${hhmm(new Date(at))} に保存`;
+  $('#mineBody').innerHTML = diffLines(theirs, mine);
+  $('#theirsBody').innerHTML = diffLines(mine, theirs);
+  const d = $('#conflictDialog');
+  d.addEventListener('cancel', (ev) => ev.preventDefault(), { once: true }); // どちらかを選んでもらう
+  const choice = await ask(d);
+  const now = new Date().toISOString();
+  if (choice === 'theirs') {
+    const keep = mineNote && theirsNote && mine !== theirs ? { ...structuredClone(mineNote), id: uid('n'), title: `${mineNote.title}（この端末の版）`, trashed: now } : null;
+    state.subjects = remote.subjects;
+    state.notes = remote.notes;
+    state.name = remote.name || '';
+    if (keep) state.notes.push(keep);
+  } else if (theirsNote && mine !== theirs) {
+    state.notes.push({ ...structuredClone(theirsNote), id: uid('n'), title: `${theirsNote.title}（ほかの端末の版）`, trashed: now });
   }
+  cloud.resolveConflict(at);
+  save();
+  render();
+  toast(choice === 'theirs' ? 'ほかの端末の内容にしました' : '自分の内容で保存しました');
 });
-// 覚えておいた選択範囲を本文に戻す
-function restoreSelection() {
-  editor.focus();
-  if (savedRange && editor.contains(savedRange.startContainer)) {
-    const sel = getSelection();
-    sel.removeAllRanges();
-    sel.addRange(savedRange);
-  }
-}
-// 書式コマンドを実行して保存する (css=true なら色などを style で付ける)
-function exec(cmd, value = null, css = false) {
-  if (!currentNote()) return;
-  restoreSelection();
-  document.execCommand('styleWithCSS', false, css);
-  document.execCommand(cmd, false, value);
-  document.execCommand('styleWithCSS', false, false);
-  convertFonts();
-  saveEditor();
-  updateToolState();
-}
-// 太字などがいまオンかどうか (使えない環境では false)
-const qs = (cmd) => { try { return document.queryCommandState(cmd); } catch { return false; } };
-// 太字・斜体などのボタンの押された状態を、カーソルの位置に合わせる
-function updateToolState() {
-  toolbar.querySelectorAll('[data-cmd="bold"],[data-cmd="italic"],[data-cmd="strikeThrough"],[data-cmd="underline"]').forEach((b) => {
-    b.setAttribute('aria-pressed', qs(b.dataset.cmd));
-  });
-}
-
-// 文字の大きさ: fontSize 7 で仮に包んでから、指定の px の span に置きかえる
-function convertFonts() {
-  const spans = [];
-  editor.querySelectorAll('font[size="7"]').forEach((f) => {
-    const span = document.createElement('span');
-    if (tools.size) span.style.fontSize = tools.size;
-    span.append(...f.childNodes);
-    f.replaceWith(span);
-    spans.push(span);
-  });
-  // 置きかえで選択が外れるので、同じ範囲を選び直す (続けて色も塗れるように)
-  if (spans.length && spans.some((s) => s.textContent)) {
-    const r = document.createRange();
-    r.setStartBefore(spans[0]);
-    r.setEndAfter(spans[spans.length - 1]);
-    const sel = getSelection();
-    sel.removeAllRanges();
-    sel.addRange(r);
-    savedRange = r.cloneRange();
-  }
-}
-// 文字の大きさを変える (px で指定)
-function setFontSize(px) {
-  tools.size = px;
-  exec('fontSize', '7');
-}
-
-// 見出しなどのブロックを切りかえる。同じものなら本文 (p) に戻す
-function setBlock(tag) {
-  const cur = (document.queryCommandValue('formatBlock') || '').toLowerCase();
-  exec('formatBlock', cur === tag ? 'p' : tag);
-}
-
-// チェックリストのオン/オフ (箇条書きに checklist クラスを付ける)
-function toggleChecklist() {
-  restoreSelection();
-  const sel = getSelection();
-  let ul = sel.anchorNode && (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement).closest('ul');
-  if (!ul || !editor.contains(ul)) {
-    document.execCommand('insertUnorderedList');
-    const n = getSelection().anchorNode;
-    ul = n && (n.nodeType === 1 ? n : n.parentElement).closest('ul');
-  }
-  if (ul) ul.classList.toggle('checklist');
-  saveEditor();
-}
-
-// 3列の表 (用語・説明・メモ) を入れる
-function insertTable() {
-  const cell = '<td><br></td>';
-  const row = `<tr>${cell.repeat(3)}</tr>`;
-  exec('insertHTML', `<table><tbody><tr><th>用語</th><th>説明</th><th>メモ</th></tr>${row}${row}</tbody></table><p><br></p>`);
-}
-
-// 書式のコピー: 押した時点の書式を覚え、次に選んだ文字へ塗る
-function capturePainter() {
-  restoreSelection();
-  const n = getSelection().anchorNode;
-  const el = n && (n.nodeType === 1 ? n : n.parentElement);
-  if (!el || !editor.contains(el)) { toast('先に、書式をコピーしたい文字を選んでください'); return; }
-  let back = 'transparent';
-  for (let x = el; x && x !== editor; x = x.parentElement) {
-    const bg = getComputedStyle(x).backgroundColor;
-    if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent' && x.tagName !== 'MARK') { back = bg; break; }
-  }
-  tools.painter = {
-    bold: qs('bold'), italic: qs('italic'), underline: qs('underline'), strikeThrough: qs('strikeThrough'),
-    color: getComputedStyle(el).color, back, size: getComputedStyle(el).fontSize,
-  };
-  toolbar.querySelector('[data-cmd="painter"]').setAttribute('aria-pressed', 'true');
-  toast('塗りたい文字を選んでください');
-}
-// 書式のコピー中に文字を選んだら、覚えた書式を塗る
-editor.addEventListener('mouseup', () => {
-  const p = tools.painter;
-  const sel = getSelection();
-  if (!p || sel.isCollapsed) return;
-  tools.painter = null;
-  toolbar.querySelector('[data-cmd="painter"]').setAttribute('aria-pressed', 'false');
-  savedRange = sel.getRangeAt(0).cloneRange();
-  for (const cmd of ['bold', 'italic', 'underline', 'strikeThrough']) {
-    if (qs(cmd) !== p[cmd]) document.execCommand(cmd);
-  }
-  document.execCommand('styleWithCSS', false, true);
-  document.execCommand('foreColor', false, p.color);
-  document.execCommand('hiliteColor', false, p.back);
-  document.execCommand('styleWithCSS', false, false);
-  setFontSize(p.size);
+addEventListener('cloud-save-error', () => {
+  const chip = $('#saveChip');
+  if (chip) { chip.className = 'chip chip-error'; chip.textContent = 'クラウドに保存できませんでした（この端末には保存済み）'; }
 });
 
-// 全画面表示のオン/オフ (Esc でも戻る)
-function setFull(on) {
-  document.body.classList.toggle('note-full', on);
-  toolbar.querySelector('[data-cmd="fullscreen"]').disabled = on;
-  toolbar.querySelector('[data-cmd="exitFullscreen"]').disabled = !on;
-  editor.focus();
-}
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && document.body.classList.contains('note-full') && pop.hidden) setFull(false);
-});
-
-// ツールボックスの「復習」から、右パネルの各機能を開く
-function openReview(btnId) {
-  document.body.classList.remove('ai-collapsed');
-  if (btnId === 'summaryBtn' || btnId === 'photoBtn') { $(`#${btnId}`).click(); return; }
-  setView('review');
-  $(`#${btnId}`).click();
-}
-
-// ツールボックスのボタン (data-cmd) ごとの処理
-const actions = {
-  undo: () => exec('undo'),
-  redo: () => exec('redo'),
-  painter: () => {
-    if (tools.painter) { tools.painter = null; toolbar.querySelector('[data-cmd="painter"]').setAttribute('aria-pressed', 'false'); return; }
-    capturePainter();
-  },
-  removeFormat: () => exec('removeFormat'),
-  bold: () => exec('bold'),
-  italic: () => exec('italic'),
-  strikeThrough: () => exec('strikeThrough'),
-  underline: () => exec('underline'),
-  marker: () => exec('hiliteColor', '#fff3a3', true),
-  table: insertTable,
-  checklist: toggleChecklist,
-  foreColor: () => exec('foreColor', tools.fore, true),
-  hiliteColor: () => exec('hiliteColor', tools.back, true),
-  fullscreen: () => setFull(true),
-  exitFullscreen: () => setFull(false),
-};
-
-// --- プルダウン ---
-// ボタン (data-pop) ごとのプルダウンの中身と、項目を押したときの処理
-const pops = {
-  review: () => ({
-    html: `<button type="button" data-i="quizBtn">${icon('test')}テストを作る</button>
-      <button type="button" data-i="explainBtn">${icon('explain')}自分の言葉で説明する</button>
-      <button type="button" data-i="summaryBtn">${icon('summary')}要点をまとめる</button>
-      <button type="button" data-i="photoBtn">${icon('photo')}写真から取り込む</button>`,
-    run: (b) => openReview(b.dataset.i),
-  }),
-  heading: () => ({
-    html: [['h1', '大見出し', 20], ['h2', '中見出し', 17], ['h3', '小見出し', 15], ['h4', '見出し4', 13.5], ['p', '本文', 13]]
-      .map(([t, l, s]) => `<button type="button" data-i="${t}"><span style="font-size:${s}px;font-weight:${t === 'p' ? 400 : 600}">${l}</span></button>`).join(''),
-    run: (b) => exec('formatBlock', b.dataset.i),
-  }),
-  size: () => ({
-    html: '<p class="pop-title">文字の大きさ</p>' + SIZES.map(([l, px]) => `<button type="button" class="size-item" data-i="${px}"><span style="font-size:${px}">${l}</span><small class="hint">${px}</small></button>`).join(''),
-    run: (b) => setFontSize(b.dataset.i),
-  }),
-  list: () => ({
-    html: `<button type="button" data-i="insertUnorderedList">${icon('summary')}箇条書き</button>
-      <button type="button" data-i="insertOrderedList"><b style="width:16px;font-size:11px">1.</b>番号付き</button>
-      <button type="button" data-i="checklist">${icon('test')}チェックリスト</button>`,
-    run: (b) => (b.dataset.i === 'checklist' ? toggleChecklist() : exec(b.dataset.i)),
-  }),
-  align: () => ({
-    html: [['justifyLeft', '左そろえ'], ['justifyCenter', '中央そろえ'], ['justifyRight', '右そろえ']]
-      .map(([c, l]) => `<button type="button" data-i="${c}">${l}</button>`).join(''),
-    run: (b) => exec(b.dataset.i),
-  }),
-  fore: () => ({
-    html: '<p class="pop-title">文字色</p><div class="swatches">'
-      + FORE.map(([l, c]) => `<button type="button" data-i="${c}" style="--c:${c}" title="${l}" aria-label="${l}"></button>`).join('')
-      + '<button type="button" class="none" data-i="" title="元の色" aria-label="元の色"></button></div>',
-    run: (b) => {
-      if (!b.dataset.i) { exec('foreColor', getComputedStyle(editor).color, true); return; }
-      tools.fore = b.dataset.i;
-      $('#foreBar').style.setProperty('--c', tools.fore);
-      exec('foreColor', tools.fore, true);
-    },
-  }),
-  hilite: () => ({
-    html: '<p class="pop-title">背景色</p><div class="swatches">'
-      + BACK.map(([l, c]) => `<button type="button" data-i="${c}" style="--c:${c}" title="${l}" aria-label="${l}"></button>`).join('')
-      + '<button type="button" class="none" data-i="" title="なし" aria-label="なし"></button></div>',
-    run: (b) => {
-      if (!b.dataset.i) { exec('hiliteColor', 'transparent', true); return; }
-      tools.back = b.dataset.i;
-      $('#hiliteBar').style.setProperty('--c', tools.back);
-      exec('hiliteColor', tools.back, true);
-    },
-  }),
-};
-let popRun = null;
-let popOwner = null;
-// プルダウンをボタンの下に開く
-function openPop(btn) {
-  const def = pops[btn.dataset.pop]();
-  pop.innerHTML = def.html;
-  popRun = def.run;
-  pop.hidden = false;
-  const r = btn.getBoundingClientRect();
-  pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))}px`;
-  pop.style.top = `${r.bottom + 6}px`;
-  popOwner = btn;
-  btn.setAttribute('aria-expanded', 'true');
-}
-function closePop() {
-  if (pop.hidden) return;
-  pop.hidden = true;
-  popOwner?.setAttribute('aria-expanded', 'false');
-  popOwner = null;
-}
-// ツールボックスを押しても、本文で選んでいる文字が外れないようにする
-[toolbar, pop].forEach((el) => el.addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); }));
-// ツールボックスのクリック: プルダウン / 見出し / 各コマンドへ振り分ける
-toolbar.addEventListener('click', (e) => {
-  const b = e.target.closest('button');
-  if (!b || b.disabled) return;
-  if (b.dataset.pop) { const same = popOwner === b; closePop(); if (!same) openPop(b); return; }
-  closePop();
-  if (b.dataset.block) setBlock(b.dataset.block);
-  else if (actions[b.dataset.cmd]) actions[b.dataset.cmd]();
-});
-// プルダウンの項目を押したら実行して閉じる
-pop.addEventListener('click', (e) => {
-  const b = e.target.closest('[data-i]');
-  if (!b) return;
-  const run = popRun;
-  closePop();
-  run(b);
-});
-// 外を押す・Esc・画面サイズの変更・スクロールでプルダウンを閉じる
-document.addEventListener('pointerdown', (e) => {
-  if (!pop.hidden && !pop.contains(e.target) && !e.target.closest('[data-pop]')) closePop();
-});
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePop(); });
-window.addEventListener('resize', closePop);
-$('.main').addEventListener('scroll', closePop);
-
-// ---------- トースト ----------
-// 画面の下に短いメッセージを少しだけ出す
+// ---------- お知らせ ----------
+let toastTimer = null;
 function toast(msg) {
-  let t = $('#toast');
-  if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; t.setAttribute('role', 'status'); document.body.append(t); }
+  document.querySelector('.toast')?.remove();
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.setAttribute('role', 'status');
   t.textContent = msg;
-  t.hidden = false;
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => { t.hidden = true; }, 2400);
+  document.body.append(t);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.remove(), 2600);
 }
 
-// ---------- 初期表示 ----------
-// 復習パネルは最初は閉じておき、右下の丸い「AI」ボタンで開く (スマホは下のタブで開く)
-document.body.classList.add('ai-collapsed');
-if (state.noteId) openContainersOf(currentNote());
-renderSidebar();
-renderNote();
-resetAiPanel();
-// ホームの「＋」から来たら、新しいノートを作る
-if (location.hash === '#new') {
-  history.replaceState(null, '', location.pathname);
-  addNote(state.sel.subjectId, state.sel.unitId);
-}
+renderAccount();
+render();

@@ -37,6 +37,10 @@ let canPush = false;
 export let firstTime = false;
 // ログイン前にこの端末で書いたノートを、Supabase のノートと合わせたか
 export let merged = false;
+// Supabase の行を最後に読んだ・書いた時刻。保存の前に比べて、ほかの端末が先に保存していないか確かめる
+let stamp = null;
+// 競合を見つけて、画面の答えを待っている間は送らない
+let waiting = false;
 
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* 保存できなくても動かす */ } };
@@ -55,7 +59,7 @@ export async function start(storageKey) {
   user = await currentUser();
   if (!user) return 'guest';
 
-  const { data: row, error } = await client.from(TABLE).select('data').eq('user_id', user.id).maybeSingle();
+  const { data: row, error } = await client.from(TABLE).select('data, updated_at').eq('user_id', user.id).maybeSingle();
   if (error) {
     // 読めなかったときに送ると、Supabase の新しい内容を古い内容で上書きしてしまうので送らない
     console.error('Supabase から読み込めませんでした', error);
@@ -63,6 +67,7 @@ export async function start(storageKey) {
   }
 
   const owner = lsGet(OWNER_KEY);
+  stamp = row?.updated_at ?? null;
   if (row) {
     // この端末に「ログインせずに書いたノート」(持ち主の記録なし) があれば、消さずに合わせる。
     // 本人のノートの写し (持ち主 = 本人) なら Supabase を正とする (ほかの端末で消したノートを戻さないため)
@@ -123,14 +128,34 @@ export function push(data) {
 // 待っている内容があれば、すぐに送る
 export async function flush() {
   clearTimeout(timer);
-  if (!canPush || !pending) return;
+  if (!canPush || !pending || waiting) return;
+  // ほかの端末が、こちらが読んだあとに保存していたら上書きしない (409 競合)。画面に選んでもらう
+  if (stamp) {
+    const { data: row, error } = await client.from(TABLE).select('data, updated_at').eq('user_id', user.id).maybeSingle();
+    if (!error && row && row.updated_at !== stamp && new Date(row.updated_at) > new Date(stamp)) {
+      waiting = true;
+      window.dispatchEvent(new CustomEvent('cloud-conflict', { detail: { remote: row.data, at: row.updated_at } }));
+      return;
+    }
+  }
   const data = pending;
   pending = null;
-  const { error } = await client.from(TABLE).upsert({ user_id: user.id, data, updated_at: new Date().toISOString() });
+  const updated_at = new Date().toISOString();
+  const { error } = await client.from(TABLE).upsert({ user_id: user.id, data, updated_at });
   if (error) {
     console.error('Supabase に保存できませんでした', error);
     window.dispatchEvent(new CustomEvent('cloud-save-error'));
+    return;
   }
+  stamp = updated_at;
+  window.dispatchEvent(new CustomEvent('cloud-saved'));
+}
+
+// 競合の答えが決まったら呼ぶ。at = ほかの端末の保存時刻。
+// このあと push した内容 (選んだほう) で Supabase を上書きする
+export function resolveConflict(at) {
+  stamp = at;
+  waiting = false;
 }
 
 // 画面を離れるときは、待たずに送る
